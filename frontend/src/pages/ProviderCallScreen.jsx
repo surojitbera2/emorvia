@@ -45,7 +45,7 @@ export default function ProviderCallScreen() {
 
   useEffect(() => {
     const s = getSession();
-    if (!s || s.role !== "provider") { nav("/provider/login"); return; }
+    if (!s || s.role !== "provider") { nav("/register"); return; }
     (async () => {
       try {
         const [provider, billing] = await Promise.all([api.getProviderMe(), api.getPublicBilling().catch(() => ({ providerSharePct: 60 }))]);
@@ -58,7 +58,7 @@ export default function ProviderCallScreen() {
         setCaller({ id: userId, name: "User" });
         meRef.current = provider; userIdRef.current = userId;
         signaling.connect(provider.id);
-      } catch { nav("/provider/login"); }
+      } catch { nav("/register"); }
     })();
     let mounted = true;
 

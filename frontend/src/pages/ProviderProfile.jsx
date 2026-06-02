@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, Star, Video, Wallet as WalletIcon, AlertTriangle, X, Clock, MessageCircle, ChevronRight, ZoomIn } from "lucide-react";
+import { ChevronLeft, Star, Video, Wallet as WalletIcon, AlertTriangle, X, Clock, MessageCircle, ChevronRight, ZoomIn, Heart } from "lucide-react";
 import { MobileShell, PrimaryButton } from "../components/MobileShell";
 import { api } from "../lib/store";
 import { getSession } from "../lib/auth";
@@ -21,7 +21,7 @@ export default function ProviderProfile() {
 
   useEffect(() => {
     const s = getSession();
-    if (!s || s.role !== "user") { nav("/login"); return; }
+    if (!s || s.role !== "user") { nav("/register"); return; }
     (async () => {
       try {
         const [p, u, whatsapp] = await Promise.all([
@@ -299,6 +299,22 @@ export default function ProviderProfile() {
                 {provider.busy ? "Provider is busy" : provider.online ? "Start Video Call" : "Provider Offline"}
               </PrimaryButton>
             )}
+            {/* Chat is always available (same billing model as call) */}
+            <button
+              data-testid="start-chat-btn"
+              onClick={() => {
+                if (!provider.online) { toast.error("Provider is offline"); return; }
+                if (provider.busy) { toast.error("Provider is on another call. Try again in a moment."); return; }
+                if (perMinRate <= 0) { toast.error("Listener hasn't set their rate yet"); return; }
+                if (user.wallet < perMinRate) { toast.error(`Need at least ${inr(perMinRate)} (1 minute) to start. Please recharge.`); return; }
+                nav(`/chat/${provider.id}`);
+              }}
+              disabled={!provider.online || provider.busy || perMinRate <= 0}
+              className="w-full flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-[#3DDC97]/10 border border-[#3DDC97]/40 text-[#3DDC97] font-semibold hover:bg-[#3DDC97]/20 disabled:opacity-40 transition-colors"
+            >
+              <MessageCircle className="w-4 h-4" />
+              {provider.busy ? "Provider is busy" : provider.online ? `Start Chat · ${inr(perMinRate)}/min` : "Provider Offline"}
+            </button>
             {realMeetEnabled && (
               <a
                 data-testid="real-meet-btn"
@@ -308,11 +324,11 @@ export default function ProviderProfile() {
                 onClick={handleRealMeetClick}
                 className="w-full flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-[#6FA8FF] text-white font-semibold hover:bg-[#5B92F5] transition-colors"
               >
-                <MessageCircle className="w-4 h-4" />
+                <Heart className="w-4 h-4" />
                 Real Meet
               </a>
             )}
-            {!isProviderAvailable && (
+            {!isProviderAvailable && !videoCallEnabled && (
               <div className="w-full py-3.5 rounded-xl bg-white/5 text-center text-[#A9B1CC] font-semibold border border-white/10">
                 Provider Unavailable
               </div>

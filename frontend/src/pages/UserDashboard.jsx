@@ -14,7 +14,7 @@ export default function UserDashboard() {
 
   useEffect(() => {
     const s = getSession();
-    if (!s || s.role !== "user") { nav("/login"); return; }
+    if (!s || s.role !== "user") { nav("/register"); return; }
     (async () => {
       try {
         const [me, list] = await Promise.all([
@@ -22,7 +22,7 @@ export default function UserDashboard() {
           api.getProviders(),
         ]);
         setUser(me); setProviders(list);
-      } catch { nav("/login"); }
+      } catch (e) { if (e?.isAuthError) nav("/register"); }
     })();
     // eslint-disable-next-line
   }, []);

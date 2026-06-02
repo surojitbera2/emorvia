@@ -21,13 +21,17 @@ export default function ProviderHome() {
 
   useEffect(() => {
     const s = getSession();
-    if (!s || s.role !== "provider") { nav("/provider/login"); return; }
+    if (!s || s.role !== "provider") { nav("/"); return; }
     (async () => {
       try {
         const p = await api.getProviderMe();
         setMe(p); onlineRef.current = p.online;
         signaling.connect(p.id);
-      } catch { clearSession(); nav("/provider/login"); }
+      } catch (e) {
+        // Only clear session on real auth failure — keep the user logged in across
+        // network blips / server restarts.
+        if (e?.isAuthError) { clearSession(); nav("/"); }
+      }
     })();
 
     const offReq = signaling.on("call_request", (m) => {
@@ -45,7 +49,26 @@ export default function ProviderHome() {
             onClick: () => {},
           });
         }
-        return { from: m.from, fromName: m.fromName, rate: m.rate };
+        return { from: m.from, fromName: m.fromName, rate: m.rate, kind: "call" };
+      });
+    });
+
+    const offChatReq = signaling.on("chat_request", (m) => {
+      setIncoming((cur) => {
+        if (cur && cur.from === m.from) return cur;
+        if (!onlineRef.current) {
+          signaling.send("chat_reject", m.from, { reason: "offline" });
+          return cur;
+        }
+        ringtone.start();
+        if (document.hidden) {
+          notify.show("💬 New chat · EMORVIA", `${m.fromName || "User"} wants to chat`, {
+            tag: "incoming-chat",
+            requireInteraction: true,
+            onClick: () => {},
+          });
+        }
+        return { from: m.from, fromName: m.fromName, kind: "chat" };
       });
     });
 
@@ -69,6 +92,7 @@ export default function ProviderHome() {
 
     return () => {
       offReq();
+      offChatReq();
       ringtone.stop();
       if ("serviceWorker" in navigator) {
         navigator.serviceWorker.removeEventListener("message", onSwMessage);
@@ -119,17 +143,27 @@ export default function ProviderHome() {
   const accept = () => {
     if (!incoming) return;
     ringtone.stop();
-    signaling.send("call_accept", incoming.from);
     const userId = incoming.from;
-    setIncoming(null);
-    nav(`/provider/call/${userId}`);
+    if (incoming.kind === "chat") {
+      signaling.send("chat_accept", userId);
+      setIncoming(null);
+      nav(`/provider/chat/${userId}`);
+    } else {
+      signaling.send("call_accept", userId);
+      setIncoming(null);
+      nav(`/provider/call/${userId}`);
+    }
   };
   const reject = () => {
     if (!incoming) return;
     ringtone.stop();
-    signaling.send("call_reject", incoming.from);
+    if (incoming.kind === "chat") {
+      signaling.send("chat_reject", incoming.from);
+    } else {
+      signaling.send("call_reject", incoming.from);
+    }
     setIncoming(null);
-    toast("Call rejected");
+    toast(incoming.kind === "chat" ? "Chat declined" : "Call rejected");
   };
 
   return (
@@ -243,10 +277,10 @@ export default function ProviderHome() {
           <div className="w-full max-w-md bg-[#171C33] rounded-t-3xl border-t border-white/10 p-6 pb-24 fade-up">
             <div className="flex items-center gap-2 mb-1">
               <span className="w-2 h-2 rounded-full bg-[#10B981] dot-pulse" />
-              <p className="text-xs uppercase tracking-wider text-[#A9B1CC]">Incoming call</p>
+              <p className="text-xs uppercase tracking-wider text-[#A9B1CC]">{incoming.kind === "chat" ? "Incoming chat" : "Incoming call"}</p>
             </div>
             <p className="font-heading text-2xl font-bold mt-1">{incoming.fromName || "Caller"}</p>
-            <p className="text-sm text-[#A9B1CC]">Wants to talk with you</p>
+            <p className="text-sm text-[#A9B1CC]">{incoming.kind === "chat" ? "Wants to chat with you" : "Wants to talk with you"}</p>
             <div className="mt-6 grid grid-cols-2 gap-3">
               <button data-testid="reject-call" onClick={reject} className="py-4 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#EF4444] font-semibold flex items-center justify-center gap-2">
                 <X className="w-4 h-4" /> Reject

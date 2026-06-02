@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 2 verification complete (OTP-only auth, never auto-logout, chat feature). Backend: 18/18 pytest tests pass — includes new chat tests covering POST /api/call/log with channel='chat' (₹20 amount, ₹12 provider earnings @60% default), provider sharePctOverride=70 yielding ₹14 earnings, omitted channel defaulting to 'call', and CallLog channel field round-trip. Existing health/OTP/admin/provider/billing/per-minute tests all green. Frontend: 10/10 targeted flows pass — Welcome page shows ONLY 'Continue with mobile number' CTA (no legacy 'I already have an account' / 'Are you a listener?' links), /login and /provider/login redirect to /register, Register has 0 password fields, OTP bypass 7777777777/2411 logs in successfully with emorvia_token + emorvia_session in localStorage, session persists across reload and root URL auto-redirects to /app when authed, ProviderProfile shows 'Start Chat · ₹20/min' alongside Start Video Call, navigating to /chat/:id renders ChatScreen with chat-input (disabled while ringing), chat-send, chat-end, chat-amount testids, /provider/chat/:userId renders ProviderChatScreen with earnings meter and no JS errors, AdminPayments displays Provider 60% / Admin 40% split, ProviderProfileEdit form shows 'PER-MINUTE CALL CHARGE (₹)' editable field, and inducing a transient 404 fetch does NOT clear localStorage token (no auto-logout).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_emorvia_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "/app/node-backend/server.js is now 2261 lines (was 2063) — chat handlers added inline; recommend splitting into routers (auth, admin, provider, calls, chat, billing, uploads) — backlog item P2 still applies.",
+    "Two parallel sets of socket handlers (call_* and chat_*) duplicate ~80% of their logic (request/accept/reject/end/insufficient_balance/auto-cutoff). Consider abstracting into a single 'session' state machine to reduce duplication.",
+    "ChatScreen.jsx (327 lines) and ProviderChatScreen.jsx mirror CallScreen.jsx structure — extract shared timer + billing-meter + socket lifecycle hook (useSessionBilling).",
+    "AdminLayout appears not to strictly guard child admin routes on initial render (direct nav to /admin/payments rendered slider UI even when test set a provider-role session). Verify role-check redirect kicks in before render to avoid information leakage.",
+    "Backlog items from iteration 1 still open: per-mobile OTP cooldown, idempotent welcome-bonus, PATCH /admin/providers/:id 404-on-unknown."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_emorvia_backend.py (added TestChatCallLog + TestFrontendRoutes classes; channel assertion added to existing call-log test)"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "100% (10/10 targeted flows)"},
+  "test_credentials": "Admin: admindash / Admin#2026* | User OTP bypass: 7777777777 / 2411 | Provider OTP bypass: 6666666666 / 0401 | Legacy provider password: 8000000001 / pro123",
+  "seed_data_creation": "Test user 7777777777 wallet topped up multiple times (₹1000–₹2000 each) via /api/admin/users/:id/adjust. Provider Aarav Mehta (8000000001) perMinRate flipped 20↔40↔50 and restored to 20 at end; sharePctOverride toggled 70/null and restored to null. Provider Riya (8000000002) used for chat-override test (sharePctOverride=70 → restored to null, perMinRate restored to 20). Global providerSharePct restored to 60.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Full regression suite at /app/backend/tests/test_emorvia_backend.py covers health, OTP (bypass + live MessageCentral SMS — note: consumes 1 SMS credit per run, comment out test_otp_send_live_messagecentral to skip), admin billing GET/PUT, admin providers PATCH (perMinRate, sharePctOverride incl. null clear), provider login + PATCH /provider/me, public providers, /call/log per-minute billing for BOTH channel='call' (default) and channel='chat', and chat-channel sharePct override math. Chat dedup is per (userId, providerId, channel) for 60s — tests use different providers (Aarav vs Riya) to avoid cross-test dedup collisions within the 60s window. Frontend Playwright flows can be re-run via the same script pattern. Live socket.io chat round-trip was NOT exercised end-to-end (per the testing brief allowance) — billing path was validated via the HTTP /call/log endpoint which is the same code path the socket auto-cutoff invokes internally.",
+  "rca of the issue": "N/A — no defects found in iteration 2 changes."
+}

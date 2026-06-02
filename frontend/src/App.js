@@ -2,11 +2,11 @@ import React from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Welcome from "@/pages/Welcome";
-import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import UserDashboard from "@/pages/UserDashboard";
 import ProviderProfile from "@/pages/ProviderProfile";
 import CallScreen from "@/pages/CallScreen";
+import ChatScreen from "@/pages/ChatScreen";
 import Wallet from "@/pages/Wallet";
 import Recharge from "@/pages/Recharge";
 import UserProfile from "@/pages/UserProfile";
@@ -15,6 +15,7 @@ import ProviderEarnings from "@/pages/ProviderEarnings";
 import ProviderBlocked from "@/pages/ProviderBlocked";
 import ProviderProfileEdit from "@/pages/ProviderProfileEdit";
 import ProviderCallScreen from "@/pages/ProviderCallScreen";
+import ProviderChatScreen from "@/pages/ProviderChatScreen";
 import AdminLogin from "@/pages/AdminLogin";
 import AdminLayout from "@/pages/AdminLayout";
 
@@ -24,26 +25,29 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Welcome />} />
-          {/* Password-based auth (OTP removed) */}
-          <Route path="/login" element={<Login role="user" />} />
+          {/* OTP-only auth — single entry */}
           <Route path="/register" element={<Register />} />
+          <Route path="/login" element={<Navigate to="/register" replace />} />
+          <Route path="/provider/login" element={<Navigate to="/register" replace />} />
+          <Route path="/provider/register" element={<Navigate to="/register" replace />} />
 
           {/* User app */}
           <Route path="/app" element={<UserDashboard />} />
           <Route path="/provider/:id" element={<ProviderProfile />} />
           <Route path="/call/:id" element={<CallScreen />} />
+          <Route path="/chat/:id" element={<ChatScreen />} />
           <Route path="/wallet" element={<Wallet />} />
           <Route path="/recharge" element={<Recharge />} />
           <Route path="/profile" element={<UserProfile />} />
 
-          {/* Provider — login only. Admin creates new providers. */}
-          <Route path="/provider/login" element={<Login role="provider" />} />
+          {/* Provider */}
           <Route path="/provider" element={<ProviderHome />} />
           <Route path="/provider/earnings" element={<ProviderEarnings />} />
           <Route path="/provider/blocked" element={<ProviderBlocked />} />
           <Route path="/provider/profile" element={<ProviderHome />} />
           <Route path="/provider/profile/edit" element={<ProviderProfileEdit />} />
           <Route path="/provider/call/:userId" element={<ProviderCallScreen />} />
+          <Route path="/provider/chat/:userId" element={<ProviderChatScreen />} />
 
           {/* Admin */}
           <Route path="/admin/login" element={<AdminLogin />} />

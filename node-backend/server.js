@@ -150,6 +150,7 @@ const TxnSchema = new mongoose.Schema({
 const CallLogSchema = new mongoose.Schema({
   userId: { type: String, index: true },
   providerId: { type: String, index: true },
+  channel: { type: String, enum: ["call", "chat"], default: "call", index: true },
   durationSec: Number,
   amount: Number,           // gross billed to user
   bonusUsed: { type: Number, default: 0 },  // portion paid from welcome credit
@@ -496,10 +497,11 @@ const callLogInFlight = new Map(); // key=`${userId}:${providerId}` -> Promise<l
 const CALL_LOG_DEDUP_WINDOW_MS = 60 * 1000; // 60 seconds dedup window
 
 app.post("/api/call/log", auth("user"), async (req, res) => {
-  const { providerId, durationSec, autoCutoff } = req.body || {};
+  const { providerId, durationSec, autoCutoff, channel } = req.body || {};
   if (!providerId || durationSec == null) return res.status(400).json({ error: "missing fields" });
+  const ch = channel === "chat" ? "chat" : "call";
 
-  const lockKey = `${req.user.id}:${providerId}`;
+  const lockKey = `${req.user.id}:${providerId}:${ch}`;
 
   // SYNCHRONOUS check: if another request for this exact key is in flight,
   // await its result and return the same log (no double-charge).
@@ -521,6 +523,7 @@ app.post("/api/call/log", auth("user"), async (req, res) => {
     const recent = await CallLog.findOne({
       userId: req.user.id,
       providerId,
+      channel: ch,
       at: { $gte: new Date(now - CALL_LOG_DEDUP_WINDOW_MS) },
     }).sort({ at: -1 });
     if (recent) return recent;
@@ -548,7 +551,7 @@ app.post("/api/call/log", auth("user"), async (req, res) => {
       : 0;
 
     const log = await CallLog.create({
-      userId: req.user.id, providerId, durationSec, amount,
+      userId: req.user.id, providerId, channel: ch, durationSec, amount,
       bonusUsed, realUsed,
       providerEarnings: providerCredit, sharePct,
       autoCutoff: !!autoCutoff,
@@ -558,7 +561,8 @@ app.post("/api/call/log", auth("user"), async (req, res) => {
         { _id: req.user.id },
         { $inc: { wallet: -amount, bonusBalance: -bonusUsed } }
       );
-      await Txn.create({ userId: req.user.id, type: "debit", amount, note: `Call ${durationSec}s${bonusUsed > 0 ? ` (₹${bonusUsed.toFixed(2)} bonus)` : ""}` });
+      const label = ch === "chat" ? "Chat" : "Call";
+      await Txn.create({ userId: req.user.id, type: "debit", amount, note: `${label} ${durationSec}s${bonusUsed > 0 ? ` (₹${bonusUsed.toFixed(2)} bonus)` : ""}` });
       if (providerCredit > 0) {
         await Provider.updateOne({ _id: providerId }, { $inc: { earnings: providerCredit, daily: providerCredit } });
       }
@@ -1977,6 +1981,199 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ============================================================
+  //  CHAT (text) — same billing model as calls (per-min × share%)
+  // ============================================================
+
+  // CHAT REQUEST  (user → provider)
+  socket.on("chat_request", async (msg = {}) => {
+    const to = msg.to;
+    const from = socket.data.id;
+    if (!to || !from) return;
+
+    const blocks = providerBlocks.get(to);
+    if (blocks && blocks.has(from)) {
+      deliver("chat_reject", from, { from: to, reason: "blocked" });
+      return;
+    }
+
+    const provider = await Provider.findById(to);
+    if (!provider) return;
+    if (provider.busy) {
+      deliver("chat_reject", from, { from: to, reason: "busy" });
+      return;
+    }
+
+    deliver("chat_request", to, { ...msg, from });
+
+    pushToOwner(to, {
+      type: "incoming_chat",
+      title: "💬 New chat · EMORVIA",
+      body: `${msg.fromName || "Someone"} wants to chat with you`,
+      callerId: from,
+      callerName: msg.fromName || "User",
+      tag: `chat-${from}`,
+    }).catch(() => {});
+  });
+
+  // CHAT ACCEPT  (provider → server → user)
+  socket.on("chat_accept", async (msg = {}) => {
+    try {
+      const userId = msg.to;
+      const providerId = socket.data.id;
+      if (!userId || !providerId) return;
+
+      const billing = await Settings.findOne({ key: "billing" });
+      const globalSharePct = Number(billing?.value?.providerSharePct ?? DEFAULT_PROVIDER_SHARE_PCT);
+
+      const user = await User.findById(userId);
+      if (!user) return;
+
+      const prov = await Provider.findById(providerId).select("perMinRate sharePctOverride");
+      if (!prov) return;
+
+      const perMinRate = Math.max(0, Number(prov.perMinRate) || 0);
+      const providerSharePct = effectiveSharePct(prov, globalSharePct);
+
+      const wallet = Number(user.wallet || 0);
+      let allowedSec = 0;
+      if (perMinRate > 0) {
+        allowedSec = Math.floor(wallet / perMinRate) * 60;
+      }
+
+      if (allowedSec <= 0) {
+        deliver("chat_reject", userId, { reason: "insufficient_balance" });
+        return;
+      }
+
+      const chatId = crypto.randomUUID();
+      activeCalls.set(chatId, {
+        callId: chatId,
+        channel: "chat",
+        userId,
+        providerId,
+        startedAt: Date.now(),
+        allowedSec,
+        providerSharePct,
+        perMinRate,
+      });
+
+      await Provider.updateOne({ _id: providerId }, { $set: { busy: true } });
+
+      deliver("chat_accept", userId, { ...msg, from: providerId, allowedSec, perMinRate });
+
+      // AUTO END timer (wallet exhaustion)
+      setTimeout(async () => {
+        try {
+          const call = activeCalls.get(chatId);
+          if (!call) return;
+          const durationSec = Math.floor((Date.now() - call.startedAt) / 1000);
+          const amount = computeCallAmount(durationSec, call.perMinRate);
+          const freshUser = await User.findById(call.userId);
+          if (!freshUser) return;
+          if (amount > 0 && freshUser.wallet >= amount) {
+            const currentBonus = Math.max(0, Number(freshUser.bonusBalance || 0));
+            const bonusUsed = Math.min(amount, currentBonus);
+            const realUsed = Math.max(0, amount - bonusUsed);
+            const providerCredit = realUsed > 0
+              ? Math.round(((realUsed * call.providerSharePct) / 100) * 100) / 100
+              : 0;
+            await User.updateOne({ _id: call.userId }, { $inc: { wallet: -amount, bonusBalance: -bonusUsed } });
+            await Txn.create({ userId: call.userId, type: "debit", amount, note: `Chat ${durationSec}s` });
+            if (providerCredit > 0) {
+              await Provider.updateOne({ _id: call.providerId }, { $inc: { earnings: providerCredit, daily: providerCredit } });
+            }
+            await CallLog.create({
+              userId: call.userId, providerId: call.providerId, channel: "chat",
+              durationSec, amount, bonusUsed, realUsed,
+              providerEarnings: providerCredit, sharePct: call.providerSharePct,
+              autoCutoff: true,
+            });
+          }
+          deliver("chat_end", call.userId, { reason: "auto", durationSec });
+          deliver("chat_end", call.providerId, { reason: "auto", durationSec });
+          activeCalls.delete(chatId);
+          await Provider.updateOne({ _id: call.providerId }, { $set: { busy: false } });
+        } catch (e) { console.error("CHAT auto-end:", e.message); }
+      }, allowedSec * 1000);
+    } catch (e) {
+      console.error("CHAT ACCEPT:", e.message);
+    }
+  });
+
+  // CHAT MESSAGE  (forward text in real time)
+  socket.on("chat_message", (msg = {}) => {
+    const to = msg.to;
+    const from = socket.data.id;
+    if (!to || !from) return;
+    const text = String(msg.text || "").slice(0, 1000);
+    if (!text) return;
+    deliver("chat_message", to, {
+      from,
+      text,
+      at: Date.now(),
+      tempId: msg.tempId || null,
+    });
+  });
+
+  // TYPING indicator
+  socket.on("chat_typing", (msg = {}) => {
+    const to = msg.to;
+    const from = socket.data.id;
+    if (!to || !from) return;
+    deliver("chat_typing", to, { from, typing: !!msg.typing });
+  });
+
+  // CHAT END
+  socket.on("chat_end", async (msg = {}) => {
+    try {
+      const to = msg.to;
+      const from = socket.data.id;
+      if (!to || !from) return;
+
+      deliver("chat_end", to, { ...msg, from });
+
+      const call = findActiveCall(from, to);
+      if (call && call.channel === "chat") {
+        const durationSec = Math.floor((Date.now() - call.startedAt) / 1000);
+        const amount = computeCallAmount(durationSec, call.perMinRate);
+        const freshUser = await User.findById(call.userId);
+        if (freshUser && amount > 0 && freshUser.wallet >= amount) {
+          const currentBonus = Math.max(0, Number(freshUser.bonusBalance || 0));
+          const bonusUsed = Math.min(amount, currentBonus);
+          const realUsed = Math.max(0, amount - bonusUsed);
+          const providerCredit = realUsed > 0
+            ? Math.round(((realUsed * call.providerSharePct) / 100) * 100) / 100
+            : 0;
+          await User.updateOne({ _id: call.userId }, { $inc: { wallet: -amount, bonusBalance: -bonusUsed } });
+          await Txn.create({ userId: call.userId, type: "debit", amount, note: `Chat ${durationSec}s` });
+          if (providerCredit > 0) {
+            await Provider.updateOne({ _id: call.providerId }, { $inc: { earnings: providerCredit, daily: providerCredit } });
+          }
+          await CallLog.create({
+            userId: call.userId, providerId: call.providerId, channel: "chat",
+            durationSec, amount, bonusUsed, realUsed,
+            providerEarnings: providerCredit, sharePct: call.providerSharePct,
+            autoCutoff: false,
+          });
+        }
+        activeCalls.delete(call.callId);
+      }
+
+      await Provider.updateOne({ _id: from }, { $set: { busy: false } });
+      await Provider.updateOne({ _id: to }, { $set: { busy: false } });
+    } catch (e) {
+      console.error("CHAT END:", e.message);
+    }
+  });
+
+  // CHAT REJECT — relay only
+  socket.on("chat_reject", (msg = {}) => {
+    const to = msg.to;
+    if (!to) return;
+    deliver("chat_reject", to, { ...msg, from: socket.data.id });
+  });
+
   // OTHER SOCKET EVENTS
   [
     "call_reject",
@@ -2027,7 +2224,8 @@ io.on("connection", (socket) => {
               ? active.userId
               : active.providerId;
 
-          deliver("call_end", other, {
+          const endEvt = active.channel === "chat" ? "chat_end" : "call_end";
+          deliver(endEvt, other, {
             reason: "disconnect",
           });
 

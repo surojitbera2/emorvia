@@ -101,38 +101,16 @@ export default function Welcome() {
             <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-[#7DB6FF] to-[#5B92F5]" />
             <div className="relative flex items-center justify-between px-5 py-4">
               <span className="font-heading font-semibold text-[#101428] text-[15px] tracking-tight">
-                Get started — it's free
+                Continue with mobile number
               </span>
               <span className="flex items-center gap-2 text-[#101428]/85">
-                <span className="text-xs font-semibold">Continue</span>
                 <ArrowUpRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
               </span>
             </div>
           </Link>
-
-          <Link
-            to="/login"
-            data-testid="welcome-user-login"
-            className="group relative block w-full overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl hover:bg-white/[0.07] hover:border-white/20 transition-all"
-          >
-            <div className="flex items-center justify-between px-5 py-4">
-              <div className="flex flex-col">
-                <span className="font-heading font-semibold text-[#F2F5FF] text-[15px] tracking-tight">
-                  I already have an account
-                </span>
-                <span className="text-[11px] text-[#A9B1CC] mt-0.5">Sign in with your mobile</span>
-              </div>
-              <ArrowUpRight className="w-4 h-4 text-[#A9B1CC] transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-            </div>
-          </Link>
-
-          <Link
-            to="/provider/login"
-            data-testid="welcome-provider-login"
-            className="block w-full text-center py-3 text-[12px] text-[#6E7694] hover:text-[#6FA8FF] transition-colors"
-          >
-            Are you a listener? <span className="text-[#6FA8FF] font-semibold">Sign in as Listener</span>
-          </Link>
+          <p className="text-center text-[11px] text-[#6E7694] pt-1">
+            One-tap sign in or sign up — we'll text you an OTP.
+          </p>
         </div>
 
         {/* Footer */}

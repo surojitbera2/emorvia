@@ -83,7 +83,7 @@ export default function Register() {
     <MobileShell>
       <Toaster theme="dark" position="top-center" />
       <GlassHeader
-        title="Create account"
+        title="Continue"
         left={
           <button
             data-testid="register-back"
@@ -97,11 +97,11 @@ export default function Register() {
       <div className="px-6 pt-8 pb-10 space-y-6 fade-up">
         <div>
           <p className="font-heading text-3xl font-bold tracking-tight text-[#F2F5FF]">
-            {step === 1 ? "Join EMORVIA" : "Verify your number"}
+            {step === 1 ? "Welcome to EMORVIA" : "Verify your number"}
           </p>
           <p className="text-[#A9B1CC] text-sm mt-1">
             {step === 1
-              ? "Sign up with your mobile — get ₹50 free credit to start."
+              ? "Enter your mobile. New users get ₹50 free credit on signup."
               : `We sent a code to +91 ${mobile}. Check your SMS.`}
           </p>
         </div>
@@ -159,20 +159,8 @@ export default function Register() {
 
             <div className="flex items-center gap-2 text-[11px] text-[#6E7694] pt-1">
               <ShieldCheck className="w-3.5 h-3.5 text-[#3DDC97]" />
-              <span>Your number is never shared. OTP delivered by MessageCentral.</span>
+              <span>One-tap sign in or sign up. OTP delivered by MessageCentral.</span>
             </div>
-
-            <p className="text-center text-sm text-[#A9B1CC] pt-2">
-              Already a member?{" "}
-              <button
-                type="button"
-                data-testid="register-go-login"
-                onClick={() => nav("/login")}
-                className="text-[#6FA8FF] font-semibold hover:underline"
-              >
-                Sign in
-              </button>
-            </p>
           </>
         ) : (
           <>

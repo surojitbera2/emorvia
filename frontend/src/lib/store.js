@@ -17,7 +17,10 @@ const unwrap = async (p) => {
   try { return (await p).data; }
   catch (e) {
     const msg = e?.response?.data?.error || e?.message || "Network error";
-    throw new Error(msg);
+    const err = new Error(msg);
+    err.status = e?.response?.status;
+    err.isAuthError = e?.response?.status === 401 || e?.response?.status === 403;
+    throw err;
   }
 };
 
@@ -51,8 +54,10 @@ export const api = {
   getMyTxns: () => unwrap(http.get("/api/me/txns")),
   deleteMe: () => unwrap(http.delete("/api/me")),
   requestRecharge: ({ amount, refNote }) => unwrap(http.post("/api/recharge", { amount, refNote })),
-  saveCallLog: ({ providerId, durationSec, amount, autoCutoff }) =>
-    unwrap(http.post("/api/call/log", { providerId, durationSec, amount, autoCutoff })),
+  saveCallLog: ({ providerId, durationSec, amount, autoCutoff, channel }) =>
+    unwrap(http.post("/api/call/log", { providerId, durationSec, amount, autoCutoff, channel })),
+  callLog: ({ providerId, durationSec, autoCutoff, channel }) =>
+    unwrap(http.post("/api/call/log", { providerId, durationSec, autoCutoff, channel })),
 
   // ----- public catalog -----
   getProviders: () => unwrap(http.get("/api/providers")),

@@ -29,7 +29,7 @@ export default function ProviderProfileEdit() {
 
   useEffect(() => {
     const s = getSession();
-    if (!s || s.role !== "provider") { nav("/provider/login"); return; }
+    if (!s || s.role !== "provider") { nav("/register"); return; }
     (async () => {
       try {
         const [p, langs] = await Promise.all([api.getProviderMe(), api.getLanguages().catch(() => [])]);
@@ -43,7 +43,7 @@ export default function ProviderProfileEdit() {
           languages: Array.isArray(p.languages) ? p.languages : [],
           perMinRate: p.perMinRate || 20,
         });
-      } catch { nav("/provider/login"); }
+      } catch { nav("/register"); }
     })();
   }, [nav]);
 

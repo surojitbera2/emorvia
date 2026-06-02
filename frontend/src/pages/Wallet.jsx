@@ -13,12 +13,12 @@ export default function Wallet() {
 
   useEffect(() => {
     const s = getSession();
-    if (!s || s.role !== "user") { nav("/login"); return; }
+    if (!s || s.role !== "user") { nav("/register"); return; }
     (async () => {
       try {
         const [me, list] = await Promise.all([api.getMe(), api.getMyTxns()]);
         setUser(me); setTxns(list);
-      } catch { nav("/login"); }
+      } catch { nav("/register"); }
     })();
   }, [nav]);
 

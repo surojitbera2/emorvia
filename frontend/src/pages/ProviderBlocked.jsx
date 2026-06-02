@@ -17,7 +17,7 @@ export default function ProviderBlocked() {
 
   useEffect(() => {
     const s = getSession();
-    if (!s || s.role !== "provider") { nav("/provider/login"); return; }
+    if (!s || s.role !== "provider") { nav("/register"); return; }
     load();
   }, [nav]);
 

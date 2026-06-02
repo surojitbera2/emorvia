@@ -258,3 +258,125 @@ class TestCallLog:
         # 120 sec → ceil(120/60)=2 mins * 40 ₹ = 80
         expected = math.ceil(120 / 60) * 40
         assert data["amount"] == expected, f"expected {expected}, got {data.get('amount')}"
+        # default channel should be "call"
+        assert data.get("channel") in (None, "call"), f"expected channel=call, got {data.get('channel')}"
+
+
+# ---------- Chat billing (Iteration 2) ----------
+class TestChatCallLog:
+    """Verify POST /api/call/log with channel='chat' bills the same as a call
+    and dedup is channel-scoped (call vs chat). Provider earns sharePct% of realUsed."""
+
+    def _ensure_balance(self, session, admin_headers, user_headers, amount=1000):
+        me = session.get(f"{API}/me", headers=user_headers).json()
+        session.post(
+            f"{API}/admin/users/{me['id']}/adjust",
+            headers=admin_headers,
+            json={"amount": amount, "note": "TEST_ chat top-up"},
+        )
+
+    def _get_provider_id(self, session, admin_headers):
+        provs = session.get(f"{API}/admin/providers", headers=admin_headers).json()
+        prov = next((p for p in provs if p.get("mobile") == TEST_PROVIDER_MOBILE), None)
+        assert prov is not None
+        return prov["id"]
+
+    def test_chat_log_default_60_pct(self, session, admin_headers, user_headers):
+        self._ensure_balance(session, admin_headers, user_headers)
+        pid = self._get_provider_id(session, admin_headers)
+        # Reset provider to perMinRate=20, no override; global=60
+        session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"perMinRate": 20, "sharePctOverride": None},
+        )
+        session.put(f"{API}/admin/billing", headers=admin_headers, json={"providerSharePct": 60})
+
+        r = session.post(
+            f"{API}/call/log",
+            headers=user_headers,
+            json={"providerId": pid, "durationSec": 60, "channel": "chat", "autoCutoff": False},
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["channel"] == "chat"
+        # 60s → ceil(60/60)=1 min × ₹20 = ₹20
+        assert data["amount"] == 20, f"expected amount=20, got {data['amount']}"
+        # default share 60% of 20 = 12
+        assert data["sharePct"] == 60, f"expected sharePct=60, got {data['sharePct']}"
+        assert data["providerEarnings"] == 12, (
+            f"expected providerEarnings=12, got {data['providerEarnings']}"
+        )
+
+    def test_chat_log_override_70_pct(self, session, admin_headers, user_headers):
+        """When provider.sharePctOverride=70, chat earnings should use 70%, not global 60%."""
+        self._ensure_balance(session, admin_headers, user_headers, amount=2000)
+        # Use a *different* provider so chat dedup doesn't return the prior log
+        provs = session.get(f"{API}/admin/providers", headers=admin_headers).json()
+        # pick mobile 8000000002 (Riya) to avoid dedup collision with 8000000001
+        prov = next((p for p in provs if p.get("mobile") == "8000000002"), None)
+        if prov is None:
+            pytest.skip("second seeded provider not present")
+        pid2 = prov["id"]
+        session.patch(
+            f"{API}/admin/providers/{pid2}",
+            headers=admin_headers,
+            json={"perMinRate": 20, "sharePctOverride": 70},
+        )
+        try:
+            r = session.post(
+                f"{API}/call/log",
+                headers=user_headers,
+                json={"providerId": pid2, "durationSec": 60, "channel": "chat"},
+            )
+            assert r.status_code == 200, r.text
+            d = r.json()
+            assert d["channel"] == "chat"
+            assert d["amount"] == 20
+            assert d["sharePct"] == 70, f"expected sharePct=70, got {d['sharePct']}"
+            # 70% of 20 = 14
+            assert d["providerEarnings"] == 14, (
+                f"expected providerEarnings=14, got {d['providerEarnings']}"
+            )
+        finally:
+            # restore
+            session.patch(
+                f"{API}/admin/providers/{pid2}",
+                headers=admin_headers,
+                json={"perMinRate": 20, "sharePctOverride": None},
+            )
+
+    def test_call_log_omitted_channel_defaults_to_call(self, session, admin_headers, user_headers):
+        """When channel is omitted, log should be created with channel='call' (dedup independent of chat)."""
+        self._ensure_balance(session, admin_headers, user_headers)
+        # Use provider Riya (8000000002) so a fresh log can be created independently
+        provs = session.get(f"{API}/admin/providers", headers=admin_headers).json()
+        prov = next((p for p in provs if p.get("mobile") == "8000000002"), None)
+        if prov is None:
+            pytest.skip("second seeded provider not present")
+        pid2 = prov["id"]
+        session.patch(
+            f"{API}/admin/providers/{pid2}",
+            headers=admin_headers,
+            json={"perMinRate": 20, "sharePctOverride": None},
+        )
+        r = session.post(
+            f"{API}/call/log",
+            headers=user_headers,
+            json={"providerId": pid2, "durationSec": 60},
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["channel"] == "call", f"expected channel=call, got {data.get('channel')}"
+        assert data["amount"] == 20
+
+
+# ---------- Welcome / redirects (frontend route smoke via static HTML check) ----------
+class TestFrontendRoutes:
+    """Quick HTML smoke check that the SPA loads. SPA routing is client-side, so
+    every route returns the same index.html; presence is enough to detect breakage."""
+
+    def test_root_serves_index(self, session):
+        r = session.get(BASE_URL + "/")
+        assert r.status_code == 200
+        assert "<div id=\"root\"" in r.text or "<div id='root'" in r.text

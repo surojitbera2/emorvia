@@ -23,7 +23,7 @@ export default function ProviderEarnings() {
 
   useEffect(() => {
     const s = getSession();
-    if (!s || s.role !== "provider") { nav("/provider/login"); return; }
+    if (!s || s.role !== "provider") { nav("/register"); return; }
     (async () => {
       try {
         const [p, l, b] = await Promise.all([
@@ -36,7 +36,7 @@ export default function ProviderEarnings() {
         const override = p?.sharePctOverride;
         setSharePct(override != null && !isNaN(Number(override)) ? Number(override) : globalPct);
         await refreshBlocks();
-      } catch { nav("/provider/login"); }
+      } catch { nav("/register"); }
     })();
   }, [nav]);
 

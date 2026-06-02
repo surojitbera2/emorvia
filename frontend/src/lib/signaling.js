@@ -12,6 +12,8 @@ const BACKEND = process.env.REACT_APP_BACKEND_URL || "";
 const EVENTS = [
   "call_request", "call_accept", "call_reject",
   "webrtc_offer", "webrtc_answer", "webrtc_ice", "call_end",
+  "chat_request", "chat_accept", "chat_reject",
+  "chat_message", "chat_typing", "chat_end",
 ];
 
 const listeners = new Map(); // eventName -> Set<fn>

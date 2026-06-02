@@ -15,12 +15,12 @@ export default function UserProfile() {
 
   useEffect(() => {
     const s = getSession();
-    if (!s || s.role !== "user") { nav("/login"); return; }
+    if (!s || s.role !== "user") { nav("/register"); return; }
     (async () => {
       try {
         const [me, t] = await Promise.all([api.getMe(), api.getMyTxns()]);
         setUser(me); setTxnCount(t.length);
-      } catch { nav("/login"); }
+      } catch { nav("/register"); }
     })();
     // eslint-disable-next-line
   }, []);

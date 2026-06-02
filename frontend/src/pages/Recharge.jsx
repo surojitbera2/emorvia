@@ -29,7 +29,7 @@ export default function Recharge() {
 
   useEffect(() => {
     const s = getSession();
-    if (!s || s.role !== "user") { nav("/login"); return; }
+    if (!s || s.role !== "user") { nav("/register"); return; }
     (async () => {
       try {
         const [upi, u, ext] = await Promise.all([

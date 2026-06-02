@@ -135,7 +135,7 @@ export default function OtpAuth({ role = "user" }) {
             ) : (
               <p className="text-center text-sm text-[#A9B1CC] pt-2">
                 Already registered?{" "}
-                <button type="button" onClick={() => nav("/login")} className="text-[#6FA8FF] font-semibold hover:underline">
+                <button type="button" onClick={() => nav("/register")} className="text-[#6FA8FF] font-semibold hover:underline">
                   Sign in
                 </button>
               </p>
