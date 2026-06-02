@@ -70,7 +70,7 @@ if (!VAPID || !VAPID.publicKey || !VAPID.privateKey) {
   fs.writeFileSync(VAPID_FILE, JSON.stringify(VAPID, null, 2));
   console.log("Generated new VAPID keys");
 }
-webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:admin@navyasocial.in", VAPID.publicKey, VAPID.privateKey);
+webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:admin@emorvia.in", VAPID.publicKey, VAPID.privateKey);
 
 const app = express();
 app.set("trust proxy", true);  // Honour X-Forwarded-Proto from Nginx
@@ -425,7 +425,7 @@ app.get("/api/providers/:id", async (req, res) => {
 });
 app.get("/api/payments/settings", async (_req, res) => {
   const s = await Settings.findOne({ key: "payments" });
-  res.json(s?.value || { upi_id: "navyasocial@upi", qr_url: "" });
+  res.json(s?.value || { upi_id: "emorvia@upi", qr_url: "" });
 });
 
 // User self
@@ -1089,14 +1089,14 @@ app.get("/api/admin/upi", auth("admin"), async (_req, res) => {
   const s = await Settings.findOne({ key: "upiSettings" });
   res.json({ 
     upiId: s?.value?.upiId || "", 
-    upiName: s?.value?.upiName || "Bongo Bandhu",
+    upiName: s?.value?.upiName || "EMORVIA",
     qrCodeUrl: s?.value?.qrCodeUrl || ""
   });
 });
 
 app.put("/api/admin/upi", auth("admin"), async (req, res) => {
   const upiId = String(req.body?.upiId || "").trim();
-  const upiName = String(req.body?.upiName || "Bongo Bandhu").trim();
+  const upiName = String(req.body?.upiName || "EMORVIA").trim();
   const qrCodeUrl = String(req.body?.qrCodeUrl || "").trim();
   await Settings.findOneAndUpdate(
     { key: "upiSettings" },
@@ -1110,7 +1110,7 @@ app.get("/api/upi/settings", async (_req, res) => {
   const s = await Settings.findOne({ key: "upiSettings" });
   res.json({ 
     upiId: s?.value?.upiId || "", 
-    upiName: s?.value?.upiName || "Bongo Bandhu",
+    upiName: s?.value?.upiName || "EMORVIA",
     qrCodeUrl: s?.value?.qrCodeUrl || ""
   });
 });
@@ -1134,7 +1134,7 @@ app.post("/api/upi/initiate", auth("user"), async (req, res) => {
       transactionId: txnId,
       amount,
       upiId: s?.value?.upiId || "",
-      upiName: s?.value?.upiName || "Bongo Bandhu",
+      upiName: s?.value?.upiName || "EMORVIA",
       qrCodeUrl: s?.value?.qrCodeUrl || "",
     });
   } catch (e) {
@@ -1466,7 +1466,7 @@ const seedDefaults = async () => {
     console.log("seeded providers");
   }
   if (!(await Settings.findOne({ key: "payments" }))) {
-    await Settings.create({ key: "payments", value: { upi_id: "navyasocial@upi", qr_url: "https://images.unsplash.com/photo-1550482768-88b710a445fd?w=600" } });
+    await Settings.create({ key: "payments", value: { upi_id: "emorvia@upi", qr_url: "https://images.unsplash.com/photo-1550482768-88b710a445fd?w=600" } });
     console.log("seeded payment settings");
   }
   if (!(await Settings.findOne({ key: "billing" }))) {
@@ -1648,7 +1648,7 @@ io.on("connection", (socket) => {
     // ringtone, so foreground tabs get the audio cue immediately.
     pushToOwner(to, {
       type: "incoming_call",
-      title: "📞 Incoming call · Bongo Bandhu",
+      title: "📞 Incoming call · EMORVIA",
       body: `${msg.fromName || "Someone"} is calling you`,
       callerId: from,
       callerName: msg.fromName || "User",
