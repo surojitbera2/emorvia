@@ -156,7 +156,8 @@ export default function AdminProviders() {
     videoCallEnabled: p.videoCallEnabled !== false,
     online: p.online || false,
     password: "",  // Always start empty for security
-    perMinRate: p.perMinRate ?? 20,
+    callPerMinRate: p.callPerMinRate ?? p.perMinRate ?? 20,
+    chatPerMinRate: p.chatPerMinRate ?? Math.max(1, Math.round((p.perMinRate ?? 20) / 2)),
     sharePctOverride: p.sharePctOverride ?? "",
   });
   const saveEdit = async () => {
@@ -176,7 +177,8 @@ export default function AdminProviders() {
         realMeetEnabled: edit.realMeetEnabled,
         videoCallEnabled: edit.videoCallEnabled,
         online: edit.online,
-        perMinRate: Math.max(0, Number(edit.perMinRate) || 0),
+        callPerMinRate: Math.max(0, Number(edit.callPerMinRate) || 0),
+        chatPerMinRate: Math.max(0, Number(edit.chatPerMinRate) || 0),
         sharePctOverride: edit.sharePctOverride === "" || edit.sharePctOverride === null
           ? null
           : Math.max(0, Math.min(100, Number(edit.sharePctOverride))),
@@ -224,7 +226,7 @@ export default function AdminProviders() {
             <tr>
               <th className="px-4 py-3 text-left font-medium">Name</th>
               <th className="px-4 py-3 text-left font-medium">Mobile</th>
-              <th className="px-4 py-3 text-left font-medium">Rate / Share</th>
+              <th className="px-4 py-3 text-left font-medium">Call · Chat / Share</th>
               <th className="px-4 py-3 text-left font-medium">Status</th>
               <th className="px-4 py-3 text-left font-medium">Earnings</th>
               <th className="px-4 py-3 text-right font-medium">Actions</th>
@@ -245,10 +247,12 @@ export default function AdminProviders() {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-[#A9B1CC]">+91 {p.mobile}</td>
-                <td className="px-4 py-3 text-[#A9B1CC] tabular-nums">
-                  ₹{p.perMinRate ?? 20}/min
+                <td className="px-4 py-3 text-[#A9B1CC] tabular-nums whitespace-nowrap">
+                  <span className="text-[#F2F5FF]">📹 ₹{p.callPerMinRate ?? p.perMinRate ?? 20}</span>
+                  <span className="text-[#6E7694]"> · </span>
+                  <span className="text-[#F2F5FF]">💬 ₹{p.chatPerMinRate ?? Math.round((p.perMinRate ?? 20) / 2)}</span>
                   {p.sharePctOverride != null && (
-                    <span className="ml-1 text-[10px] text-[#6FA8FF]">· {p.sharePctOverride}%</span>
+                    <span className="ml-1 text-[10px] text-[#6FA8FF]"> · {p.sharePctOverride}%</span>
                   )}
                 </td>
                 <td className="px-4 py-3">
@@ -340,22 +344,33 @@ export default function AdminProviders() {
                 </div>
               </div>
 
-              <div className="grid sm:grid-cols-2 gap-3">
+              <div className="grid sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-[11px] uppercase tracking-wider text-[#A9B1CC] font-semibold mb-1.5 block">Per-min rate (₹/min)</label>
+                  <label className="text-[11px] uppercase tracking-wider text-[#A9B1CC] font-semibold mb-1.5 block">Video call rate (₹/min)</label>
                   <Input
-                    data-testid="edit-permin-rate"
+                    data-testid="edit-call-rate"
                     type="number"
                     min={0}
                     max={10000}
-                    value={edit.perMinRate}
-                    onChange={(e) => setEdit({ ...edit, perMinRate: e.target.value })}
+                    value={edit.callPerMinRate}
+                    onChange={(e) => setEdit({ ...edit, callPerMinRate: e.target.value })}
                     placeholder="e.g. 20"
                   />
-                  <p className="text-[10px] text-[#6E7694] mt-1">What users pay per minute. Provider can also set this from their profile.</p>
                 </div>
                 <div>
-                  <label className="text-[11px] uppercase tracking-wider text-[#A9B1CC] font-semibold mb-1.5 block">Payout share override (%)</label>
+                  <label className="text-[11px] uppercase tracking-wider text-[#A9B1CC] font-semibold mb-1.5 block">Chat rate (₹/min)</label>
+                  <Input
+                    data-testid="edit-chat-rate"
+                    type="number"
+                    min={0}
+                    max={10000}
+                    value={edit.chatPerMinRate}
+                    onChange={(e) => setEdit({ ...edit, chatPerMinRate: e.target.value })}
+                    placeholder="e.g. 10"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] uppercase tracking-wider text-[#A9B1CC] font-semibold mb-1.5 block">Share override (%)</label>
                   <Input
                     data-testid="edit-share-override"
                     type="number"
@@ -363,11 +378,13 @@ export default function AdminProviders() {
                     max={100}
                     value={edit.sharePctOverride}
                     onChange={(e) => setEdit({ ...edit, sharePctOverride: e.target.value })}
-                    placeholder="Leave blank for global default"
+                    placeholder="Global default"
                   />
-                  <p className="text-[10px] text-[#6E7694] mt-1">Provider's % share of each call. Leave blank to use the global setting from Payments page.</p>
                 </div>
               </div>
+              <p className="text-[10px] text-[#6E7694] -mt-1">
+                Set separate rates for video call and chat. Leave Share override blank to use the global Payments setting.
+              </p>
 
               <div>
                 <label className="text-[11px] uppercase tracking-wider text-[#A9B1CC] font-semibold mb-1.5 block">Change Password (optional)</label>

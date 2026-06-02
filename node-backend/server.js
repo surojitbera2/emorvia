@@ -123,11 +123,16 @@ const ProviderSchema = new mongoose.Schema({
   avatars: { type: [String], default: [] },
   bio: String,
   age: Number,
-  // Per-minute call charge (₹/min) — provider sets this from profile; admin can also override.
+  // Separate per-minute rates for Video Call vs Chat.
+  // Both provider and admin can set/edit independently.
+  callPerMinRate: { type: Number, default: 20 },
+  chatPerMinRate: { type: Number, default: 10 },
+  // Legacy field — kept for backward compat / migration (old code wrote this).
+  // If a fresh provider has only `perMinRate`, it's mirrored into callPerMinRate on read.
   perMinRate: { type: Number, default: 20 },
   // Optional per-provider payout share override (%). If null, falls back to global providerSharePct.
   sharePctOverride: { type: Number, default: null },
-  rate: { type: Number, default: 0 }, // DEPRECATED — kept for back-compat
+  rate: { type: Number, default: 0 }, // DEPRECATED
   online: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
   languages: { type: [String], default: [] },
@@ -490,6 +495,17 @@ const effectiveSharePct = (provider, globalPct) => {
   return Math.max(0, Math.min(100, Number(globalPct ?? DEFAULT_PROVIDER_SHARE_PCT)));
 };
 
+// Pick the per-minute rate based on session channel.
+// Falls back to legacy `perMinRate` if the channel-specific field is missing.
+const rateForChannel = (provider, channel) => {
+  if (!provider) return 0;
+  const ch = channel === "chat" ? "chat" : "call";
+  const ch_rate = ch === "chat" ? provider.chatPerMinRate : provider.callPerMinRate;
+  const legacy = provider.perMinRate;
+  const r = ch_rate != null && !isNaN(Number(ch_rate)) ? Number(ch_rate) : Number(legacy || 0);
+  return Math.max(0, r);
+};
+
 // In-flight promise map — ensures concurrent requests for the same user+provider
 // share the same promise, preventing duplicate call logs / double charging.
 // Node.js is single-threaded, so the synchronous check + set is atomic.
@@ -531,10 +547,10 @@ app.post("/api/call/log", auth("user"), async (req, res) => {
     const billing = await Settings.findOne({ key: "billing" });
     const globalSharePct = Number(billing?.value?.providerSharePct ?? DEFAULT_PROVIDER_SHARE_PCT);
 
-    // Load provider to know perMinRate + optional share override.
-    const prov = await Provider.findById(providerId).select("perMinRate sharePctOverride");
+    // Load provider to know rate + optional share override.
+    const prov = await Provider.findById(providerId).select("callPerMinRate chatPerMinRate perMinRate sharePctOverride");
     if (!prov) return null;
-    const perMinRate = Math.max(0, Number(prov.perMinRate) || 0);
+    const perMinRate = rateForChannel(prov, ch);
     const sharePct = effectiveSharePct(prov, globalSharePct);
 
     // Server is source of truth: amount = billedMinutes × perMinRate.
@@ -598,10 +614,19 @@ app.patch("/api/provider/me", auth("provider"), async (req, res) => {
   if (typeof body.name === "string") patch.name = body.name.trim().slice(0, 60);
   if (typeof body.bio === "string") patch.bio = body.bio.trim().slice(0, 300);
   if (body.age != null) patch.age = Math.max(18, Math.min(99, Number(body.age) || 18));
-  // Provider can set their own per-minute call charge (₹). Clamp to sane bounds.
-  if (body.perMinRate != null) {
+  // Provider can set their own per-minute rates (separate for call and chat).
+  if (body.callPerMinRate != null && body.callPerMinRate !== "") {
+    const r = Math.max(1, Math.min(1000, Math.round(Number(body.callPerMinRate) || 0)));
+    if (r > 0) { patch.callPerMinRate = r; patch.perMinRate = r; /* keep legacy mirror */ }
+  }
+  if (body.chatPerMinRate != null && body.chatPerMinRate !== "") {
+    const r = Math.max(1, Math.min(1000, Math.round(Number(body.chatPerMinRate) || 0)));
+    if (r > 0) patch.chatPerMinRate = r;
+  }
+  // Legacy alias — kept so older clients still work.
+  if (body.perMinRate != null && body.callPerMinRate == null) {
     const r = Math.max(1, Math.min(1000, Math.round(Number(body.perMinRate) || 0)));
-    if (r > 0) patch.perMinRate = r;
+    if (r > 0) { patch.callPerMinRate = r; patch.perMinRate = r; }
   }
   if (Array.isArray(body.avatars)) {
     patch.avatars = body.avatars.filter((u) => typeof u === "string" && u).slice(0, 8);
@@ -735,9 +760,19 @@ app.patch("/api/admin/providers/:id", auth("admin"), async (req, res) => {
   if (typeof body.status === "string" && ["pending", "active", "rejected"].includes(body.status)) patch.status = body.status;
   if (typeof body.realMeetEnabled === "boolean") patch.realMeetEnabled = body.realMeetEnabled;
   if (typeof body.videoCallEnabled === "boolean") patch.videoCallEnabled = body.videoCallEnabled;
-  // Admin can also set/override the provider's per-minute call charge.
-  if (body.perMinRate != null && body.perMinRate !== "") {
+  // Admin can also set/override the provider's per-minute rates (separate for call & chat).
+  if (body.callPerMinRate != null && body.callPerMinRate !== "") {
+    const r = Math.max(0, Math.min(10000, Math.round(Number(body.callPerMinRate) || 0)));
+    patch.callPerMinRate = r;
+    patch.perMinRate = r; // keep legacy field in sync
+  }
+  if (body.chatPerMinRate != null && body.chatPerMinRate !== "") {
+    const r = Math.max(0, Math.min(10000, Math.round(Number(body.chatPerMinRate) || 0)));
+    patch.chatPerMinRate = r;
+  }
+  if (body.perMinRate != null && body.perMinRate !== "" && body.callPerMinRate == null) {
     const r = Math.max(0, Math.min(10000, Math.round(Number(body.perMinRate) || 0)));
+    patch.callPerMinRate = r;
     patch.perMinRate = r;
   }
   // Admin per-provider payout override (% to provider). Pass null/"" to clear and use global default.
@@ -1683,12 +1718,12 @@ io.on("connection", (socket) => {
       }
 
       const prov = await Provider.findById(providerId).select(
-        "perMinRate sharePctOverride"
+        "callPerMinRate chatPerMinRate perMinRate sharePctOverride"
       );
 
       if (!prov) return;
 
-      const perMinRate = Math.max(0, Number(prov.perMinRate) || 0);
+      const perMinRate = rateForChannel(prov, "call");
       const providerSharePct = effectiveSharePct(prov, globalSharePct);
 
       const wallet = Number(user.wallet || 0);
@@ -1712,6 +1747,7 @@ io.on("connection", (socket) => {
 
       activeCalls.set(callId, {
         callId,
+        channel: "call",
         userId,
         providerId,
         startedAt: Date.now(),
@@ -2029,10 +2065,10 @@ io.on("connection", (socket) => {
       const user = await User.findById(userId);
       if (!user) return;
 
-      const prov = await Provider.findById(providerId).select("perMinRate sharePctOverride");
+      const prov = await Provider.findById(providerId).select("callPerMinRate chatPerMinRate perMinRate sharePctOverride");
       if (!prov) return;
 
-      const perMinRate = Math.max(0, Number(prov.perMinRate) || 0);
+      const perMinRate = rateForChannel(prov, "chat");
       const providerSharePct = effectiveSharePct(prov, globalSharePct);
 
       const wallet = Number(user.wallet || 0);

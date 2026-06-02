@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 3 (split callPerMinRate / chatPerMinRate + remove support banner) tested end-to-end. Backend: 11 new pytest cases added under TestSplitRates + TestZ_Cleanup, all pass. Verified both rate fields are present in GET /api/providers and GET /api/admin/providers; admin PATCH and provider self-PATCH update them independently (call-only and chat-only patches preserve the other field); /api/call/log uses callPerMinRate when channel='call' and chatPerMinRate when channel='chat'; rate-isolation: changing chat rate does NOT change call billing (verified with Vikram, call=20 chat=99 -> call log still bills 20). Payout share still works on top of split rates: global 60% on callRate=20 -> earnings 12; sharePctOverride=80 -> earnings 16. Aarav baseline (call=20, chat=10, override=null) restored at end of run. Frontend: source inspection confirms all required data-testids (pe-call-rate, pe-chat-rate, edit-call-rate, edit-chat-rate, edit-share-override) and the table column with 📹 ₹X · 💬 ₹Y rendering. UserDashboard.jsx contains zero matches for 'support', 'tel:' or 'phone' - banner fully removed. Runtime check on /app after a fresh OTP user login also showed no 'For Support' text and zero tel: links.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/auth/otp/send (live MessageCentral)", "issue": "Returns 400 REQUEST_ALREADY_EXISTS on rapid re-run because the previous OTP for mobile 9999999999 is still within rate-limit window. Not a regression - pre-existing in iter 2. The test passes when run after sufficient cool-down."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_emorvia_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Provider doc has both new fields (callPerMinRate, chatPerMinRate) AND legacy perMinRate. The admin PATCH route mirrors callPerMinRate->perMinRate, but if a client sends only legacy {perMinRate: X}, the server uses it for callPerMinRate only and leaves chatPerMinRate unchanged. This is the documented intent but is silent - consider deprecating legacy perMinRate field next iteration to avoid future confusion.",
+    "Channel-scoped dedup in /api/call/log is keyed by (user, provider, channel) within 60s. This caused 2 false-positive test failures during iteration when providers were reused across channels - main code is correct, just worth a doc/comment.",
+    "ProviderProfileEdit and AdminProviders both default chatPerMinRate to floor(perMinRate/2) when missing. UI fallback is consistent; backend migration already populated all 6 seeded providers so users will not hit this path in practice."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_emorvia_backend.py (added TestSplitRates class with 11 tests + TestZ_Cleanup; updated TestChatCallLog::test_chat_log_default_60_pct and test_chat_log_override_70_pct to set chatPerMinRate explicitly since legacy perMinRate now only mirrors to callPerMinRate)"
+  ],
+  "success_rate": {"backend": "97% (29/30 - the 1 failure is a pre-existing live SMS rate-limit, unrelated to iter 3)", "frontend": "100% on what was directly verifiable (dashboard banner removed; source inspection confirms all rate cards/inputs/testids)"},
+  "test_credentials": "Admin: admindash / Admin#2026* | User OTP bypass: 7777777777 / 2411 | Provider OTP bypass: 6666666666 / 0401 | Provider login: 8000000001 / pro123",
+  "seed_data_creation": "No new seed data. Adjusted user wallet via /admin/users/{id}/adjust during tests; reverted Aarav rates back to call=20/chat=10/override=null and global sharePct=60 in TestZ_Cleanup.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 3 split-rate backend is solid - reuse test_emorvia_backend.py TestSplitRates as regression. When testing call/chat billing don't reuse the same (provider, channel) pair within 60s because of dedup; use different seeded providers (8000000001..8000000006). Frontend route guards redirect unauth users very aggressively - direct localStorage injection then goto can race; prefer real OTP UI flow or call /api/auth/otp/verify first and store both emorvia_token and emorvia_session before navigating. Admin uses emorvia_admin_token + emorvia_admin keys; admin /admin/providers requires the admin auth. Admin pages use {'Authorization':'Bearer '+adminToken} via the admin token key, not emorvia_token.",
+  "rca of the issue": "N/A - no defects found in iteration 3. The 2 transient test failures observed during test development were caused by (a) channel-scoped 60s call-log dedup returning the previous log when reusing a (provider, channel) pair, fixed by using different providers per channel; and (b) the test response of /api/call/log not echoing back a 'perMinRate' field which was an over-spec on my side - amount field already validates the billing. Both fixed in the test file; the application code is correct."
+}

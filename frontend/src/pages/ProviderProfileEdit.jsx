@@ -20,7 +20,7 @@ export default function ProviderProfileEdit() {
   const nav = useNavigate();
   const fileRef = useRef(null);
   const [me, setMe] = useState(null);
-  const [form, setForm] = useState({ name: "", bio: "", age: 25, avatars: [], languages: [], perMinRate: 20 });
+  const [form, setForm] = useState({ name: "", bio: "", age: 25, avatars: [], languages: [], callPerMinRate: 20, chatPerMinRate: 10 });
   const [allLangs, setAllLangs] = useState([]);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -41,7 +41,8 @@ export default function ProviderProfileEdit() {
           age: p.age || 25,
           avatars: (p.avatars && p.avatars.length ? p.avatars : (p.avatar ? [p.avatar] : [])),
           languages: Array.isArray(p.languages) ? p.languages : [],
-          perMinRate: p.perMinRate || 20,
+          callPerMinRate: p.callPerMinRate ?? p.perMinRate ?? 20,
+          chatPerMinRate: p.chatPerMinRate ?? Math.max(1, Math.round((p.perMinRate ?? 20) / 2)),
         });
       } catch { nav("/register"); }
     })();
@@ -69,8 +70,10 @@ export default function ProviderProfileEdit() {
   const save = async () => {
     if (!form.name.trim()) return toast.error("Please add your name");
     if (form.avatars.length === 0) return toast.error("Add at least one image");
-    const rate = Math.round(Number(form.perMinRate) || 0);
-    if (rate < 1) return toast.error("Set a per-minute call charge of at least ₹1");
+    const callRate = Math.round(Number(form.callPerMinRate) || 0);
+    const chatRate = Math.round(Number(form.chatPerMinRate) || 0);
+    if (callRate < 1) return toast.error("Set a video call rate of at least ₹1/min");
+    if (chatRate < 1) return toast.error("Set a chat rate of at least ₹1/min");
     setBusy(true);
     try {
       const updated = await api.providerUpdateProfile({
@@ -79,7 +82,8 @@ export default function ProviderProfileEdit() {
         age: Number(form.age),
         avatars: form.avatars,
         languages: form.languages,
-        perMinRate: rate,
+        callPerMinRate: callRate,
+        chatPerMinRate: chatRate,
       });
       setMe(updated);
       toast.success("Profile saved");
@@ -153,19 +157,35 @@ export default function ProviderProfileEdit() {
             <Label>Age</Label>
             <Input data-testid="pe-age" type="number" min={18} max={99} value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} />
           </div>
-          <div>
-            <Label>Per-minute call charge (₹)</Label>
-            <Input
-              data-testid="pe-permin-rate"
-              type="number"
-              min={1}
-              max={1000}
-              value={form.perMinRate}
-              onChange={(e) => setForm({ ...form, perMinRate: e.target.value.replace(/\D/g, "").slice(0, 4) })}
-              placeholder="e.g. 20"
-            />
-            <p className="text-[10px] text-[#6E7694] mt-1">What users pay per minute of call. Your earnings = this × admin-set share %.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Video call rate (₹/min)</Label>
+              <Input
+                data-testid="pe-call-rate"
+                type="number"
+                min={1}
+                max={1000}
+                value={form.callPerMinRate}
+                onChange={(e) => setForm({ ...form, callPerMinRate: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+                placeholder="e.g. 20"
+              />
+            </div>
+            <div>
+              <Label>Chat rate (₹/min)</Label>
+              <Input
+                data-testid="pe-chat-rate"
+                type="number"
+                min={1}
+                max={1000}
+                value={form.chatPerMinRate}
+                onChange={(e) => setForm({ ...form, chatPerMinRate: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+                placeholder="e.g. 10"
+              />
+            </div>
           </div>
+          <p className="text-[10px] text-[#6E7694] -mt-3">
+            Set different rates for video calls and chat. Your earnings = rate × admin-set share %.
+          </p>
           <div>
             <Label>Mobile</Label>
             <Input value={`+91 ${me.mobile}`} readOnly className="opacity-70" />

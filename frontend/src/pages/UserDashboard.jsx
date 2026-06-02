@@ -52,26 +52,6 @@ export default function UserDashboard() {
 
 
        <div className="mt-5 fade-up delay-1">
-  <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-    <span className="text-[#A9B1CC] font-medium">
-      For Support:
-    </span>
-
-    <a
-      href="tel:+917980052977"
-      className="px-3 py-1 rounded-full bg-[#6FA8FF]/10 border border-[#6FA8FF]/20 text-[#6FA8FF] font-semibold hover:bg-[#6FA8FF]/20 transition-all"
-    >
-      +91 7980052977
-    </a>
-
-    <a
-      href="tel:+919674442673"
-      className="px-3 py-1 rounded-full bg-[#6FA8FF]/10 border border-[#6FA8FF]/20 text-[#6FA8FF] font-semibold hover:bg-[#6FA8FF]/20 transition-all"
-    >
-      +91 9674442673
-    </a>
-  </div>
-
   <div className="relative">
     <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6E7694]" />
 

@@ -66,7 +66,7 @@ export default function CallScreen() {
           api.getMe(),
         ]);
         if (!mounted) return;
-        const rate = Math.max(0, Number(p?.perMinRate) || 0);
+        const rate = Math.max(0, Number(p?.callPerMinRate ?? p?.perMinRate) || 0);
         setPerMinRate(rate);
         perMinRateRef.current = rate;
 

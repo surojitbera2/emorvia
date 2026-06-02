@@ -93,14 +93,15 @@ export default function ProviderProfile() {
     setLightboxIndex((prev) => (prev - 1 + images.length) % images.length);
   };
 
-  const perMinRate = Math.max(0, Number(provider.perMinRate) || 0);
+  const callPerMinRate = Math.max(0, Number(provider.callPerMinRate ?? provider.perMinRate) || 0);
+  const chatPerMinRate = Math.max(0, Number(provider.chatPerMinRate ?? Math.round((provider.perMinRate ?? 0) / 2)) || 0);
 
   const requestCall = () => {
     if (!provider.online) { toast.error("Provider is offline"); return; }
     if (provider.busy) { toast.error("Provider is on another call. Try again in a moment."); return; }
-    if (perMinRate <= 0) { toast.error("Listener hasn't set their call rate. Try again later."); return; }
-    if (user.wallet < perMinRate) {
-      toast.error(`Need at least ${inr(perMinRate)} (1 minute) to start. Please recharge wallet.`);
+    if (callPerMinRate <= 0) { toast.error("Listener hasn't set their video call rate. Try again later."); return; }
+    if (user.wallet < callPerMinRate) {
+      toast.error(`Need at least ${inr(callPerMinRate)} (1 minute) to start. Please recharge wallet.`);
       return;
     }
     setConfirmCall(true);
@@ -257,38 +258,40 @@ export default function ProviderProfile() {
             )}
 
             <div className="mt-5 grid grid-cols-2 gap-3">
-              {videoCallEnabled && <Stat label="Per minute" value={perMinRate > 0 ? `${inr(perMinRate)}/min` : "—"} accent />}
+              {videoCallEnabled && <Stat label="Video call" value={callPerMinRate > 0 ? `${inr(callPerMinRate)}/min` : "—"} accent />}
               <Stat label="Rating" value={<span className="flex items-center gap-1">4.8 <Star className="w-3.5 h-3.5 fill-[#6FA8FF] text-[#6FA8FF]" /></span>} />
             </div>
           </div>
 
-          {/* Only show price if video call is enabled */}
-          {videoCallEnabled && (
-            <div className="mt-5 p-4 rounded-xl bg-white/[0.03] border border-white/5 fade-up delay-1">
-              <p className="text-xs uppercase tracking-wider text-[#A9B1CC] flex items-center gap-1.5"><Clock className="w-3 h-3" /> Call rate</p>
-              {perMinRate <= 0 ? (
-                <p className="text-sm text-[#EF4444] mt-2">Rate not set by listener yet.</p>
-              ) : (
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                  <div className="bg-[#101428] border border-[#6FA8FF]/20 rounded-lg p-3 text-center">
-                    <p className="text-[10px] uppercase tracking-wider text-[#6FA8FF] font-semibold">Per min</p>
-                    <p className="font-heading text-base font-bold text-[#F2F5FF] mt-0.5">{inr(perMinRate)}</p>
+          {/* Rate cards — show both video call and chat rates */}
+          <div className="mt-5 p-4 rounded-xl bg-white/[0.03] border border-white/5 fade-up delay-1">
+            <p className="text-xs uppercase tracking-wider text-[#A9B1CC] flex items-center gap-1.5"><Clock className="w-3 h-3" /> Rates</p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {videoCallEnabled && (
+                <div className="bg-[#101428] border border-[#6FA8FF]/25 rounded-lg p-3">
+                  <div className="flex items-center gap-1.5">
+                    <Video className="w-3 h-3 text-[#6FA8FF]" />
+                    <p className="text-[10px] uppercase tracking-wider text-[#6FA8FF] font-semibold">Video call</p>
                   </div>
-                  <div className="bg-[#101428] border border-[#3DDC97]/20 rounded-lg p-3 text-center">
-                    <p className="text-[10px] uppercase tracking-wider text-[#3DDC97] font-semibold">5 min</p>
-                    <p className="font-heading text-base font-bold text-[#F2F5FF] mt-0.5">{inr(perMinRate * 5)}</p>
-                  </div>
-                  <div className="bg-[#101428] border border-white/10 rounded-lg p-3 text-center">
-                    <p className="text-[10px] uppercase tracking-wider text-[#A9B1CC] font-semibold">10 min</p>
-                    <p className="font-heading text-base font-bold text-[#F2F5FF] mt-0.5">{inr(perMinRate * 10)}</p>
-                  </div>
+                  <p className="font-heading text-lg font-bold text-[#F2F5FF] mt-1 tabular-nums">
+                    {callPerMinRate > 0 ? `${inr(callPerMinRate)}/min` : "—"}
+                  </p>
                 </div>
               )}
-              <p className="text-[11px] text-[#A9B1CC] mt-3">
-                You pay {inr(perMinRate)}/min. Call auto-ends when your wallet runs out.
-              </p>
+              <div className="bg-[#101428] border border-[#3DDC97]/25 rounded-lg p-3">
+                <div className="flex items-center gap-1.5">
+                  <MessageCircle className="w-3 h-3 text-[#3DDC97]" />
+                  <p className="text-[10px] uppercase tracking-wider text-[#3DDC97] font-semibold">Chat</p>
+                </div>
+                <p className="font-heading text-lg font-bold text-[#F2F5FF] mt-1 tabular-nums">
+                  {chatPerMinRate > 0 ? `${inr(chatPerMinRate)}/min` : "—"}
+                </p>
+              </div>
             </div>
-          )}
+            <p className="text-[11px] text-[#A9B1CC] mt-3">
+              You're billed per minute. Session auto-ends when your wallet runs out.
+            </p>
+          </div>
         </div>
 
         <div className="fixed bottom-0 left-0 right-0 z-40 pointer-events-none">
@@ -299,21 +302,21 @@ export default function ProviderProfile() {
                 {provider.busy ? "Provider is busy" : provider.online ? "Start Video Call" : "Provider Offline"}
               </PrimaryButton>
             )}
-            {/* Chat is always available (same billing model as call) */}
+            {/* Chat is always available (same billing model as call, separate rate) */}
             <button
               data-testid="start-chat-btn"
               onClick={() => {
                 if (!provider.online) { toast.error("Provider is offline"); return; }
                 if (provider.busy) { toast.error("Provider is on another call. Try again in a moment."); return; }
-                if (perMinRate <= 0) { toast.error("Listener hasn't set their rate yet"); return; }
-                if (user.wallet < perMinRate) { toast.error(`Need at least ${inr(perMinRate)} (1 minute) to start. Please recharge.`); return; }
+                if (chatPerMinRate <= 0) { toast.error("Listener hasn't set their chat rate yet"); return; }
+                if (user.wallet < chatPerMinRate) { toast.error(`Need at least ${inr(chatPerMinRate)} (1 minute) to start. Please recharge.`); return; }
                 nav(`/chat/${provider.id}`);
               }}
-              disabled={!provider.online || provider.busy || perMinRate <= 0}
+              disabled={!provider.online || provider.busy || chatPerMinRate <= 0}
               className="w-full flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-[#3DDC97]/10 border border-[#3DDC97]/40 text-[#3DDC97] font-semibold hover:bg-[#3DDC97]/20 disabled:opacity-40 transition-colors"
             >
               <MessageCircle className="w-4 h-4" />
-              {provider.busy ? "Provider is busy" : provider.online ? `Start Chat · ${inr(perMinRate)}/min` : "Provider Offline"}
+              {provider.busy ? "Provider is busy" : provider.online ? `Start Chat · ${inr(chatPerMinRate)}/min` : "Provider Offline"}
             </button>
             {realMeetEnabled && (
               <a

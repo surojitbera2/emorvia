@@ -59,8 +59,8 @@ export default function ChatScreen() {
       try {
         const [p, u] = await Promise.all([api.getProvider(providerId), api.getMe()]);
         if (!mounted) return;
-        const rate = Math.max(0, Number(p?.perMinRate) || 0);
-        if (rate <= 0) { toast.error("Listener hasn't set a rate yet"); nav(-1); return; }
+        const rate = Math.max(0, Number(p?.chatPerMinRate ?? Math.round((p?.perMinRate ?? 0) / 2)) || 0);
+        if (rate <= 0) { toast.error("Listener hasn't set a chat rate yet"); nav(-1); return; }
         if (u.wallet < rate) { toast.error(`Need ${inr(rate)} minimum to start. Recharge first.`); nav("/wallet"); return; }
         const ms = Math.floor(u.wallet / rate) * 60;
         setProvider(p); setMe(u); setPerMinRate(rate); setMaxSec(ms);

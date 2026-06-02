@@ -284,11 +284,11 @@ class TestChatCallLog:
     def test_chat_log_default_60_pct(self, session, admin_headers, user_headers):
         self._ensure_balance(session, admin_headers, user_headers)
         pid = self._get_provider_id(session, admin_headers)
-        # Reset provider to perMinRate=20, no override; global=60
+        # Reset provider to callRate=20 chatRate=20, no override; global=60
         session.patch(
             f"{API}/admin/providers/{pid}",
             headers=admin_headers,
-            json={"perMinRate": 20, "sharePctOverride": None},
+            json={"callPerMinRate": 20, "chatPerMinRate": 20, "sharePctOverride": None},
         )
         session.put(f"{API}/admin/billing", headers=admin_headers, json={"providerSharePct": 60})
 
@@ -321,7 +321,7 @@ class TestChatCallLog:
         session.patch(
             f"{API}/admin/providers/{pid2}",
             headers=admin_headers,
-            json={"perMinRate": 20, "sharePctOverride": 70},
+            json={"callPerMinRate": 20, "chatPerMinRate": 20, "sharePctOverride": 70},
         )
         try:
             r = session.post(
@@ -369,6 +369,280 @@ class TestChatCallLog:
         data = r.json()
         assert data["channel"] == "call", f"expected channel=call, got {data.get('channel')}"
         assert data["amount"] == 20
+
+
+# ---------- Iteration 3: split callPerMinRate / chatPerMinRate ----------
+class TestSplitRates:
+    """Iteration 3 — provider has separate callPerMinRate and chatPerMinRate.
+    Legacy `perMinRate` is mirrored from callPerMinRate.
+
+    Tests:
+    - GET /api/providers and /api/admin/providers expose both fields.
+    - PATCH /api/admin/providers/:id updates both fields independently.
+    - PATCH /api/provider/me updates both fields independently.
+    - POST /api/call/log uses the correct rate per channel (isolation).
+    - Payout share % still applies (global + sharePctOverride).
+    """
+
+    PROVIDER_MOBILE = TEST_PROVIDER_MOBILE  # 8000000001 — Aarav
+
+    def _get_provider(self, session, admin_headers, mobile=None):
+        mobile = mobile or self.PROVIDER_MOBILE
+        provs = session.get(f"{API}/admin/providers", headers=admin_headers).json()
+        prov = next((p for p in provs if p.get("mobile") == mobile), None)
+        assert prov is not None, f"provider {mobile} not seeded"
+        return prov
+
+    def _ensure_balance(self, session, admin_headers, user_headers, amount=2000):
+        me = session.get(f"{API}/me", headers=user_headers).json()
+        session.post(
+            f"{API}/admin/users/{me['id']}/adjust",
+            headers=admin_headers,
+            json={"amount": amount, "note": "TEST_ split-rate top-up"},
+        )
+
+    # 1) Admin and public lists expose both fields
+    def test_admin_providers_has_both_rate_fields(self, session, admin_headers):
+        provs = session.get(f"{API}/admin/providers", headers=admin_headers).json()
+        assert isinstance(provs, list) and provs
+        # At least the seeded provider should have both fields.
+        prov = self._get_provider(session, admin_headers)
+        assert "callPerMinRate" in prov, f"callPerMinRate missing: {prov.keys()}"
+        assert "chatPerMinRate" in prov, f"chatPerMinRate missing: {prov.keys()}"
+        assert isinstance(prov["callPerMinRate"], (int, float))
+        assert isinstance(prov["chatPerMinRate"], (int, float))
+
+    def test_public_providers_has_both_rate_fields(self, session):
+        provs = session.get(f"{API}/providers").json()
+        assert isinstance(provs, list) and provs
+        first = provs[0]
+        assert "callPerMinRate" in first
+        assert "chatPerMinRate" in first
+
+    # 2) Admin PATCH updates both fields independently and persists
+    def test_admin_patch_both_rates(self, session, admin_headers):
+        prov = self._get_provider(session, admin_headers)
+        pid = prov["id"]
+        r = session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"callPerMinRate": 25, "chatPerMinRate": 12},
+        )
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["callPerMinRate"] == 25
+        assert d["chatPerMinRate"] == 12
+        # legacy mirror
+        assert d.get("perMinRate") == 25, f"legacy perMinRate should mirror call rate, got {d.get('perMinRate')}"
+        # GET-verify persistence
+        provs = session.get(f"{API}/admin/providers", headers=admin_headers).json()
+        again = next(p for p in provs if p["id"] == pid)
+        assert again["callPerMinRate"] == 25
+        assert again["chatPerMinRate"] == 12
+
+    def test_admin_patch_rates_independent(self, session, admin_headers):
+        """Updating callPerMinRate alone must NOT change chatPerMinRate, and vice versa."""
+        prov = self._get_provider(session, admin_headers)
+        pid = prov["id"]
+        # Set baseline
+        session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"callPerMinRate": 30, "chatPerMinRate": 15},
+        )
+        # Update only call
+        r1 = session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"callPerMinRate": 33},
+        )
+        assert r1.status_code == 200
+        d1 = r1.json()
+        assert d1["callPerMinRate"] == 33
+        assert d1["chatPerMinRate"] == 15, f"chat rate should be untouched, got {d1['chatPerMinRate']}"
+        # Update only chat
+        r2 = session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"chatPerMinRate": 17},
+        )
+        assert r2.status_code == 200
+        d2 = r2.json()
+        assert d2["callPerMinRate"] == 33, f"call rate should be untouched, got {d2['callPerMinRate']}"
+        assert d2["chatPerMinRate"] == 17
+
+    # 3) Provider self-PATCH updates both rates independently
+    def test_provider_me_patch_both_rates(self, session, provider_headers):
+        r = session.patch(
+            f"{API}/provider/me",
+            headers=provider_headers,
+            json={"callPerMinRate": 35, "chatPerMinRate": 18},
+        )
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["callPerMinRate"] == 35
+        assert d["chatPerMinRate"] == 18
+
+    def test_provider_me_rate_isolation(self, session, provider_headers):
+        # baseline 35/18 from prior test; patch only call
+        r1 = session.patch(f"{API}/provider/me", headers=provider_headers, json={"callPerMinRate": 40})
+        assert r1.status_code == 200
+        assert r1.json()["callPerMinRate"] == 40
+        assert r1.json()["chatPerMinRate"] == 18
+        # patch only chat
+        r2 = session.patch(f"{API}/provider/me", headers=provider_headers, json={"chatPerMinRate": 22})
+        assert r2.status_code == 200
+        assert r2.json()["callPerMinRate"] == 40
+        assert r2.json()["chatPerMinRate"] == 22
+
+    # 4) Call/Chat billing uses correct rate per channel
+    def test_call_log_uses_call_rate(self, session, admin_headers, user_headers):
+        # Use Neha (8000000006) — not touched by earlier tests, so call-dedup is fresh
+        prov = self._get_provider(session, admin_headers, mobile="8000000006")
+        pid = prov["id"]
+        # callRate=30, chatRate=15
+        session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"callPerMinRate": 30, "chatPerMinRate": 15, "sharePctOverride": None},
+        )
+        self._ensure_balance(session, admin_headers, user_headers)
+        # call channel — should bill 30
+        r = session.post(
+            f"{API}/call/log",
+            headers=user_headers,
+            json={"providerId": pid, "durationSec": 60, "channel": "call", "autoCutoff": False},
+        )
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["channel"] == "call"
+        assert d["amount"] == 30, f"call should bill 30 from callPerMinRate, got {d['amount']}"
+
+    def test_chat_log_uses_chat_rate(self, session, admin_headers, user_headers):
+        # Use Vikram (8000000003) — earlier tests only used him on 'call' channel,
+        # so chat-channel dedup is fresh.
+        prov = self._get_provider(session, admin_headers, mobile="8000000003")
+        pid = prov["id"]
+        # callRate=30, chatRate=15
+        session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"callPerMinRate": 30, "chatPerMinRate": 15, "sharePctOverride": None},
+        )
+        self._ensure_balance(session, admin_headers, user_headers)
+        r = session.post(
+            f"{API}/call/log",
+            headers=user_headers,
+            json={"providerId": pid, "durationSec": 60, "channel": "chat", "autoCutoff": False},
+        )
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["channel"] == "chat"
+        assert d["amount"] == 15, f"chat should bill 15 from chatPerMinRate, got {d['amount']}"
+
+    def test_changing_chat_rate_does_not_affect_call_billing(self, session, admin_headers, user_headers):
+        """Set call=20, chat=10; then bump chat to 99 — a fresh call/log on 'call' channel must still bill at 20."""
+        prov = self._get_provider(session, admin_headers, mobile="8000000003")  # Vikram
+        pid = prov["id"]
+        session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"callPerMinRate": 20, "chatPerMinRate": 10, "sharePctOverride": None},
+        )
+        # Now change chat only to 99
+        session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"chatPerMinRate": 99},
+        )
+        self._ensure_balance(session, admin_headers, user_headers)
+        r = session.post(
+            f"{API}/call/log",
+            headers=user_headers,
+            json={"providerId": pid, "durationSec": 60, "channel": "call", "autoCutoff": False},
+        )
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["amount"] == 20, f"call billing should not be affected by chat rate change, got {d['amount']}"
+        # reset
+        session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"callPerMinRate": 20, "chatPerMinRate": 10},
+        )
+
+    # 5) Payout share % still works with split rates
+    def test_payout_share_with_split_rates(self, session, admin_headers, user_headers):
+        # Use Sanya (8000000004) — call rate 20, share 60% default → earnings 12
+        prov = self._get_provider(session, admin_headers, mobile="8000000004")
+        pid = prov["id"]
+        # Ensure global 60%, override null, call=20 chat=10
+        session.put(f"{API}/admin/billing", headers=admin_headers, json={"providerSharePct": 60})
+        session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"callPerMinRate": 20, "chatPerMinRate": 10, "sharePctOverride": None},
+        )
+        self._ensure_balance(session, admin_headers, user_headers)
+        r = session.post(
+            f"{API}/call/log",
+            headers=user_headers,
+            json={"providerId": pid, "durationSec": 60, "channel": "call", "autoCutoff": False},
+        )
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["amount"] == 20
+        assert d["sharePct"] == 60
+        assert d["providerEarnings"] == 12, f"60% of 20 = 12, got {d['providerEarnings']}"
+
+    def test_payout_share_override_with_split_rates(self, session, admin_headers, user_headers):
+        # Use Rohan (8000000005) — set override 80% on call rate 20 → earnings 16
+        prov = self._get_provider(session, admin_headers, mobile="8000000005")
+        pid = prov["id"]
+        session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"callPerMinRate": 20, "chatPerMinRate": 10, "sharePctOverride": 80},
+        )
+        self._ensure_balance(session, admin_headers, user_headers, amount=3000)
+        try:
+            r = session.post(
+                f"{API}/call/log",
+                headers=user_headers,
+                json={"providerId": pid, "durationSec": 60, "channel": "call", "autoCutoff": False},
+            )
+            assert r.status_code == 200, r.text
+            d = r.json()
+            assert d["amount"] == 20
+            assert d["sharePct"] == 80
+            assert d["providerEarnings"] == 16, f"80% of 20 = 16, got {d['providerEarnings']}"
+        finally:
+            session.patch(
+                f"{API}/admin/providers/{pid}",
+                headers=admin_headers,
+                json={"sharePctOverride": None},
+            )
+
+
+# ---------- Cleanup: restore Aarav to call=20, chat=10, override=null ----------
+class TestZ_Cleanup:
+    def test_restore_aarav_baseline(self, session, admin_headers, provider_headers):
+        # Restore provider self (Aarav, 8000000001) via admin
+        provs = session.get(f"{API}/admin/providers", headers=admin_headers).json()
+        prov = next((p for p in provs if p.get("mobile") == TEST_PROVIDER_MOBILE), None)
+        assert prov is not None
+        r = session.patch(
+            f"{API}/admin/providers/{prov['id']}",
+            headers=admin_headers,
+            json={"callPerMinRate": 20, "chatPerMinRate": 10, "sharePctOverride": None},
+        )
+        assert r.status_code == 200
+        d = r.json()
+        assert d["callPerMinRate"] == 20
+        assert d["chatPerMinRate"] == 10
+        assert d["sharePctOverride"] is None
+        # Also restore global share
+        session.put(f"{API}/admin/billing", headers=admin_headers, json={"providerSharePct": 60})
 
 
 # ---------- Welcome / redirects (frontend route smoke via static HTML check) ----------
