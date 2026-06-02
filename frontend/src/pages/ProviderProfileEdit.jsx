@@ -1,0 +1,286 @@
+import React, { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ChevronLeft, Upload, X, Save, Hourglass, CheckCircle2, Languages, Trash2 } from "lucide-react";
+import { MobileShell, GlassHeader, PrimaryButton, Input, Label } from "../components/MobileShell";
+import { api } from "../lib/store";
+import { getSession, clearSession } from "../lib/auth";
+import { toast, Toaster } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../components/ui/alert-dialog";
+
+export default function ProviderProfileEdit() {
+  const nav = useNavigate();
+  const fileRef = useRef(null);
+  const [me, setMe] = useState(null);
+  const [form, setForm] = useState({ name: "", bio: "", age: 25, avatars: [], languages: [], perMinRate: 20 });
+  const [allLangs, setAllLangs] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    const s = getSession();
+    if (!s || s.role !== "provider") { nav("/provider/login"); return; }
+    (async () => {
+      try {
+        const [p, langs] = await Promise.all([api.getProviderMe(), api.getLanguages().catch(() => [])]);
+        setMe(p);
+        setAllLangs(langs);
+        setForm({
+          name: p.name?.startsWith("Listener") ? "" : (p.name || ""),
+          bio: p.bio || "",
+          age: p.age || 25,
+          avatars: (p.avatars && p.avatars.length ? p.avatars : (p.avatar ? [p.avatar] : [])),
+          languages: Array.isArray(p.languages) ? p.languages : [],
+          perMinRate: p.perMinRate || 20,
+        });
+      } catch { nav("/provider/login"); }
+    })();
+  }, [nav]);
+
+  const onPickFiles = async (e) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    for (const f of files) if (f.size > 8 * 1024 * 1024) { toast.error(`${f.name} > 8MB`); return; }
+    setUploading(true);
+    try {
+      const { urls } = await api.providerUploadImages(files);
+      setForm((s) => ({ ...s, avatars: [...s.avatars, ...urls].slice(0, 8) }));
+      toast.success(`${urls.length} image(s) uploaded`);
+    } catch (err) { toast.error(err.message); }
+    finally { setUploading(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
+  const removeImg = (i) => setForm((s) => ({ ...s, avatars: s.avatars.filter((_, idx) => idx !== i) }));
+  const makeCover = (i) => setForm((s) => {
+    if (i === 0) return s;
+    const a = [...s.avatars]; const [it] = a.splice(i, 1); a.unshift(it);
+    return { ...s, avatars: a };
+  });
+
+  const save = async () => {
+    if (!form.name.trim()) return toast.error("Please add your name");
+    if (form.avatars.length === 0) return toast.error("Add at least one image");
+    const rate = Math.round(Number(form.perMinRate) || 0);
+    if (rate < 1) return toast.error("Set a per-minute call charge of at least ₹1");
+    setBusy(true);
+    try {
+      const updated = await api.providerUpdateProfile({
+        name: form.name.trim(),
+        bio: form.bio.trim(),
+        age: Number(form.age),
+        avatars: form.avatars,
+        languages: form.languages,
+        perMinRate: rate,
+      });
+      setMe(updated);
+      toast.success("Profile saved");
+      if (updated.status === "active") setTimeout(() => nav("/provider"), 500);
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await api.deleteProviderMe();
+      toast.success("Account deleted");
+      clearSession();
+      setTimeout(() => nav("/"), 400);
+    } catch (e) {
+      toast.error(e.message || "Failed to delete account");
+      setDeleting(false);
+      setConfirmOpen(false);
+    }
+  };
+
+  if (!me) return null;
+  const pending = me.status === "pending";
+
+  return (
+    <MobileShell>
+      <Toaster theme="dark" position="top-center" />
+      <GlassHeader
+        title="Edit profile"
+        left={<button data-testid="pe-back" onClick={() => nav(-1)} className="mr-1 -ml-2 p-2 rounded-lg hover:bg-white/5"><ChevronLeft className="w-5 h-5" /></button>}
+      />
+      <div className="px-5 pt-5 pb-32 space-y-5">
+        {pending ? (
+          <div className="p-4 rounded-2xl bg-[#6FA8FF]/10 border border-[#6FA8FF]/30 flex items-start gap-3 fade-up">
+            <Hourglass className="w-5 h-5 text-[#6FA8FF] shrink-0 mt-0.5" />
+            <div>
+              <p className="font-heading font-semibold text-[#6FA8FF]">Profile under review</p>
+              <p className="text-xs text-[#A9B1CC] mt-1">Complete your details — admin will review and activate your listing. You won't appear in search until approved.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 rounded-2xl bg-[#10B981]/10 border border-[#10B981]/30 flex items-center gap-3 fade-up">
+            <CheckCircle2 className="w-5 h-5 text-[#10B981]" />
+            <div>
+              <p className="font-heading font-semibold text-[#10B981]">Profile active</p>
+              <p className="text-xs text-[#A9B1CC]">Your listing is visible to users.</p>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-[#171C33] border border-white/5 rounded-2xl p-5 space-y-4 fade-up delay-1">
+          <div>
+            <Label>Display name</Label>
+            <Input data-testid="pe-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Your professional name" />
+          </div>
+          <div>
+            <Label>Bio</Label>
+            <textarea
+              data-testid="pe-bio"
+              value={form.bio}
+              onChange={(e) => setForm({ ...form, bio: e.target.value })}
+              placeholder="A short intro — your specialty and experience."
+              rows={3}
+              maxLength={300}
+              className="w-full bg-[#101428] border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-[#6E7694] focus:outline-none focus:border-[#6FA8FF] text-sm"
+            />
+            <p className="text-[10px] text-[#6E7694] mt-1">{form.bio.length}/300</p>
+          </div>
+          <div>
+            <Label>Age</Label>
+            <Input data-testid="pe-age" type="number" min={18} max={99} value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} />
+          </div>
+          <div>
+            <Label>Per-minute call charge (₹)</Label>
+            <Input
+              data-testid="pe-permin-rate"
+              type="number"
+              min={1}
+              max={1000}
+              value={form.perMinRate}
+              onChange={(e) => setForm({ ...form, perMinRate: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+              placeholder="e.g. 20"
+            />
+            <p className="text-[10px] text-[#6E7694] mt-1">What users pay per minute of call. Your earnings = this × admin-set share %.</p>
+          </div>
+          <div>
+            <Label>Mobile</Label>
+            <Input value={`+91 ${me.mobile}`} readOnly className="opacity-70" />
+            <p className="text-[10px] text-[#6E7694] mt-1">Mobile is locked to your verified number.</p>
+          </div>
+          <div>
+            <Label><Languages className="inline w-3.5 h-3.5 mr-1 -mt-0.5" /> Languages you speak</Label>
+            {allLangs.length === 0 ? (
+              <p className="text-xs text-[#6E7694] py-2">No languages available yet. Ask admin to add some.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2 mt-1">
+                {allLangs.map((lang) => {
+                  const active = form.languages.includes(lang);
+                  return (
+                    <button
+                      key={lang}
+                      type="button"
+                      data-testid={`lang-${lang}`}
+                      onClick={() => setForm((s) => ({
+                        ...s,
+                        languages: active ? s.languages.filter((x) => x !== lang) : [...s.languages, lang],
+                      }))}
+                      className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-all ${
+                        active
+                          ? "bg-[#6FA8FF] text-black border-[#6FA8FF]"
+                          : "bg-white/5 text-[#A9B1CC] border-white/10 hover:border-[#6FA8FF]/40 hover:text-white"
+                      }`}
+                    >
+                      {lang}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <p className="text-[10px] text-[#6E7694] mt-2">Tap to select / deselect. Users see your languages on your profile.</p>
+          </div>
+        </div>
+
+        <div className="bg-[#171C33] border border-white/5 rounded-2xl p-5 fade-up delay-2">
+          <Label>Profile images <span className="text-[10px] text-[#A9B1CC]">(first = cover, up to 8)</span></Label>
+          <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={onPickFiles} data-testid="pe-file-input" />
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading || form.avatars.length >= 8}
+            data-testid="pe-browse"
+            className="mt-2 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#6FA8FF]/40 text-[#6FA8FF] hover:bg-[#6FA8FF]/10 text-sm font-semibold disabled:opacity-50"
+          >
+            <Upload className="w-4 h-4" /> {uploading ? "Uploading…" : "Browse images"}
+          </button>
+
+          {form.avatars.length > 0 && (
+            <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 gap-2.5">
+              {form.avatars.map((url, i) => (
+                <div key={url + i} className="relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-[#101428] group">
+                  <img src={url} alt="" className="w-full h-full object-cover" />
+                  {i === 0 && <span className="absolute bottom-1 left-1 text-[9px] font-bold bg-[#6FA8FF] text-black px-1.5 py-0.5 rounded">COVER</span>}
+                  <button onClick={() => removeImg(i)} data-testid={`pe-rm-${i}`} className="absolute top-1 right-1 w-6 h-6 bg-black/70 hover:bg-[#EF4444] rounded-full text-white flex items-center justify-center">
+                    <X className="w-3 h-3" />
+                  </button>
+                  {i !== 0 && (
+                    <button onClick={() => makeCover(i)} className="absolute bottom-1 right-1 text-[9px] bg-black/70 text-white px-1.5 py-0.5 rounded">
+                      Set cover
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <PrimaryButton data-testid="pe-save" onClick={save} disabled={busy}>
+          <Save className="w-4 h-4" /> {busy ? "Saving…" : "Save profile"}
+        </PrimaryButton>
+
+        <button
+          type="button"
+          data-testid="pe-delete-account-btn"
+          onClick={() => setConfirmOpen(true)}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-[#EF4444]/40 text-[#EF4444] hover:bg-[#EF4444]/10 font-semibold text-sm transition-colors fade-up delay-3"
+        >
+          <Trash2 className="w-4 h-4" /> Delete account
+        </button>
+      </div>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent
+          data-testid="pe-delete-confirm-dialog"
+          className="bg-[#171C33] border border-white/10 text-white"
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white font-heading">Delete your account?</AlertDialogTitle>
+            <AlertDialogDescription className="text-[#A9B1CC]">
+              This will permanently delete your provider profile, photos, call history and any pending earnings record. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              data-testid="pe-delete-cancel-btn"
+              disabled={deleting}
+              className="bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white"
+            >
+              No
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="pe-delete-confirm-btn"
+              disabled={deleting}
+              onClick={(e) => { e.preventDefault(); handleDelete(); }}
+              className="bg-[#EF4444] text-white hover:bg-[#DC2626]"
+            >
+              {deleting ? "Deleting…" : "Yes, delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </MobileShell>
+  );
+}

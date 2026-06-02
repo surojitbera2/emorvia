@@ -1,0 +1,12 @@
+Options -Indexes
+
+# Block direct access to library files
+<FilesMatch "\.(env|sql)$">
+  Require all denied
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # Pretty URLs not required; everything works via direct .php files.
+  # Block access to the lib folder from web.
+</IfModule>
