@@ -41,16 +41,25 @@ export default function ProviderChatScreen() {
 
     (async () => {
       try {
-        const [p, b] = await Promise.all([
+        const [p, b, history] = await Promise.all([
           api.getProviderMe(),
           api.getPublicBilling().catch(() => ({ providerSharePct: 60 })),
+          api.chatMessages(userId, 50).catch(() => []),
         ]);
         setMe(p);
-        setPerMinRate(Math.max(0, Number(p.perMinRate) || 0));
+        setPerMinRate(Math.max(0, Number(p.chatPerMinRate ?? Math.round((p.perMinRate ?? 0) / 2)) || 0));
         const globalPct = Number(b?.providerSharePct ?? 60);
         const override = p?.sharePctOverride;
         setSharePct(override != null && !isNaN(Number(override)) ? Number(override) : globalPct);
-        signaling.connect(p.id);
+        if (Array.isArray(history) && history.length) {
+          setMessages(history.map((m) => ({
+            from: m.mine ? "me" : "them",
+            text: m.text,
+            at: new Date(m.at).getTime(),
+            historical: true,
+          })));
+        }
+        signaling.connect(p.id, "provider");
       } catch (e) { nav("/provider"); return; }
     })();
 

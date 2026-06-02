@@ -57,7 +57,11 @@ export default function ChatScreen() {
 
     const init = async () => {
       try {
-        const [p, u] = await Promise.all([api.getProvider(providerId), api.getMe()]);
+        const [p, u, history] = await Promise.all([
+          api.getProvider(providerId),
+          api.getMe(),
+          api.chatMessages(providerId, 50).catch(() => []),
+        ]);
         if (!mounted) return;
         const rate = Math.max(0, Number(p?.chatPerMinRate ?? Math.round((p?.perMinRate ?? 0) / 2)) || 0);
         if (rate <= 0) { toast.error("Listener hasn't set a chat rate yet"); nav(-1); return; }
@@ -66,7 +70,17 @@ export default function ChatScreen() {
         setProvider(p); setMe(u); setPerMinRate(rate); setMaxSec(ms);
         perMinRateRef.current = rate; maxSecRef.current = ms;
 
-        signaling.connect(s.id);
+        // Preload historical messages so the user sees continuity.
+        if (Array.isArray(history) && history.length) {
+          setMessages(history.map((m) => ({
+            from: m.mine ? "me" : "them",
+            text: m.text,
+            at: new Date(m.at).getTime(),
+            historical: true,
+          })));
+        }
+
+        signaling.connect(s.id, "user");
         // Send chat request to provider
         signaling.send("chat_request", providerId, { fromName: u.mobile || "User" });
 

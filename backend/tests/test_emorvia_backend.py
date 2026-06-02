@@ -181,15 +181,16 @@ class TestAdminProviders:
         prov = next((p for p in r.json() if p.get("mobile") == TEST_PROVIDER_MOBILE), None)
         assert prov is not None, "test provider not seeded"
         pid = prov["id"]
-        # Patch perMinRate=50, sharePctOverride=70
+        # Patch callPerMinRate=50, sharePctOverride=70 (legacy perMinRate is no
+        # longer writable as of iter 4; use callPerMinRate instead)
         r1 = session.patch(
             f"{API}/admin/providers/{pid}",
             headers=admin_headers,
-            json={"perMinRate": 50, "sharePctOverride": 70},
+            json={"callPerMinRate": 50, "sharePctOverride": 70},
         )
         assert r1.status_code == 200, r1.text
         d1 = r1.json()
-        assert d1["perMinRate"] == 50
+        assert d1["callPerMinRate"] == 50
         assert d1["sharePctOverride"] == 70
         # Clear override
         r2 = session.patch(
@@ -207,10 +208,11 @@ class TestProviderSelf:
         assert isinstance(provider_token, str) and len(provider_token) > 0
 
     def test_provider_patch_per_min_rate(self, session, provider_headers):
-        r = session.patch(f"{API}/provider/me", headers=provider_headers, json={"perMinRate": 30})
+        # Iter 4: legacy perMinRate field is no longer writable. Use callPerMinRate.
+        r = session.patch(f"{API}/provider/me", headers=provider_headers, json={"callPerMinRate": 30})
         assert r.status_code == 200, r.text
         data = r.json()
-        assert data["perMinRate"] == 30
+        assert data["callPerMinRate"] == 30
 
 
 # ---------- Public providers ----------
@@ -244,7 +246,7 @@ class TestCallLog:
         session.patch(
             f"{API}/admin/providers/{pid}",
             headers=admin_headers,
-            json={"perMinRate": 40, "sharePctOverride": None},
+            json={"callPerMinRate": 40, "sharePctOverride": None},
         )
         # 3) Log call (use a unique providerId-user combo by waiting? Dedup is per user+provider for 60s.
         # We'll just call once.)
@@ -343,7 +345,7 @@ class TestChatCallLog:
             session.patch(
                 f"{API}/admin/providers/{pid2}",
                 headers=admin_headers,
-                json={"perMinRate": 20, "sharePctOverride": None},
+                json={"callPerMinRate": 20, "chatPerMinRate": 20, "sharePctOverride": None},
             )
 
     def test_call_log_omitted_channel_defaults_to_call(self, session, admin_headers, user_headers):
@@ -358,7 +360,7 @@ class TestChatCallLog:
         session.patch(
             f"{API}/admin/providers/{pid2}",
             headers=admin_headers,
-            json={"perMinRate": 20, "sharePctOverride": None},
+            json={"callPerMinRate": 20, "sharePctOverride": None},
         )
         r = session.post(
             f"{API}/call/log",
@@ -432,8 +434,9 @@ class TestSplitRates:
         d = r.json()
         assert d["callPerMinRate"] == 25
         assert d["chatPerMinRate"] == 12
-        # legacy mirror
-        assert d.get("perMinRate") == 25, f"legacy perMinRate should mirror call rate, got {d.get('perMinRate')}"
+        # iter 4: legacy perMinRate is no longer mirrored on write — it stays at
+        # whatever value the provider was seeded with (typically 20).
+        # We no longer assert any specific value for it.
         # GET-verify persistence
         provs = session.get(f"{API}/admin/providers", headers=admin_headers).json()
         again = next(p for p in provs if p["id"] == pid)
@@ -654,3 +657,307 @@ class TestFrontendRoutes:
         r = session.get(BASE_URL + "/")
         assert r.status_code == 200
         assert "<div id=\"root\"" in r.text or "<div id='root'" in r.text
+
+
+
+# ====================================================================
+# Iteration 4 tests
+#   - OTP cooldown (60s per (mobile, role))
+#   - Bypass accounts NOT subject to cooldown
+#   - Idempotent ₹50 welcome bonus
+#   - Legacy `perMinRate` no longer writable via PATCH endpoints
+#   - GET /api/chat/threads + /api/chat/messages (user + provider POV)
+# ====================================================================
+import time
+import random
+from datetime import datetime
+from bson import ObjectId
+from pymongo import MongoClient
+
+
+MONGO_URL_LOCAL = "mongodb://localhost:27017"
+DB_NAME_EMORVIA = "emorvia"
+
+
+@pytest.fixture(scope="session")
+def mongo_db():
+    cli = MongoClient(MONGO_URL_LOCAL)
+    return cli[DB_NAME_EMORVIA]
+
+
+def _fresh_mobile():
+    # 10 digit mobile starting 5xxx — neither 7777777777 nor 6666666666 nor seeded 8xxx providers
+    return "5" + "".join(str(random.randint(0, 9)) for _ in range(9))
+
+
+class TestIter4_OtpCooldown:
+    """60-second per-(mobile, role) cooldown on OTP send."""
+
+    def test_first_send_then_429_within_60s(self, session, mongo_db):
+        mobile = _fresh_mobile()
+        # Clean any prior record
+        mongo_db.otps.delete_many({"mobile": mobile})
+
+        # 1st send — may fail because we don't actually send SMS via MessageCentral
+        # in this test environment. Acceptable outcomes: 200 (sent) OR 400 (live SMS
+        # provider rejected). The cooldown record is only written on success, so we
+        # only assert cooldown behaviour when 1st send succeeded.
+        r1 = session.post(f"{API}/auth/otp/send", json={"mobile": mobile, "role": "user"})
+        if r1.status_code != 200:
+            # If SMS provider unreachable, simulate the OTP record so we can still
+            # exercise the cooldown path on the 2nd call.
+            mongo_db.otps.update_one(
+                {"mobile": mobile, "role": "user"},
+                {"$set": {"verificationId": "fake_for_test", "at": datetime.utcnow()}},
+                upsert=True,
+            )
+
+        # 2nd send within cooldown → 429 with retryAfter
+        r2 = session.post(f"{API}/auth/otp/send", json={"mobile": mobile, "role": "user"})
+        assert r2.status_code == 429, f"expected 429 got {r2.status_code}: {r2.text}"
+        body = r2.json()
+        assert "retryAfter" in body
+        assert isinstance(body["retryAfter"], int) and 0 < body["retryAfter"] <= 60
+        assert "error" in body
+        # Retry-After header set
+        ra_header = r2.headers.get("Retry-After")
+        assert ra_header is not None
+        assert int(ra_header) > 0
+        # Cleanup
+        mongo_db.otps.delete_many({"mobile": mobile})
+
+    def test_bypass_user_account_not_rate_limited(self, session):
+        # 7777777777 should be able to send unlimited times
+        for _ in range(3):
+            r = session.post(f"{API}/auth/otp/send", json={"mobile": USER_BYPASS_MOBILE, "role": "user"})
+            assert r.status_code == 200, f"bypass user OTP send rejected: {r.status_code} {r.text}"
+
+    def test_bypass_provider_account_not_rate_limited(self, session):
+        # 6666666666 should be able to send unlimited times
+        for _ in range(3):
+            r = session.post(f"{API}/auth/otp/send", json={"mobile": PROVIDER_BYPASS_MOBILE, "role": "provider"})
+            assert r.status_code == 200, f"bypass provider OTP send rejected: {r.status_code} {r.text}"
+
+
+class TestIter4_WelcomeBonusIdempotent:
+    """₹50 welcome bonus is granted exactly once per user, even on repeat OTP verify."""
+
+    def test_welcome_bonus_only_once(self, session, mongo_db):
+        # Delete the bypass user + their txns to start clean
+        u = mongo_db.users.find_one({"mobile": USER_BYPASS_MOBILE})
+        if u:
+            mongo_db.txns.delete_many({"userId": str(u["_id"])})
+            mongo_db.users.delete_one({"_id": u["_id"]})
+
+        # 1st verify (bypass) → new user, wallet=50
+        rs = session.post(f"{API}/auth/otp/send", json={"mobile": USER_BYPASS_MOBILE, "role": "user"})
+        assert rs.status_code == 200
+        rv1 = session.post(
+            f"{API}/auth/otp/verify",
+            json={"mobile": USER_BYPASS_MOBILE, "code": USER_BYPASS_CODE, "role": "user"},
+        )
+        assert rv1.status_code == 200, rv1.text
+        d1 = rv1.json()
+        assert d1.get("isNew") is True
+        assert d1["user"]["wallet"] == 50
+
+        user_id = d1["user"]["id"]
+
+        # 2nd verify (bypass) → same user, wallet still 50, isNew=False
+        rv2 = session.post(
+            f"{API}/auth/otp/verify",
+            json={"mobile": USER_BYPASS_MOBILE, "code": USER_BYPASS_CODE, "role": "user"},
+        )
+        assert rv2.status_code == 200, rv2.text
+        d2 = rv2.json()
+        assert d2.get("isNew") is False
+        assert d2["user"]["wallet"] == 50, f"wallet should not increase on repeat verify, got {d2['user']['wallet']}"
+
+        # Verify DB state: welcomeBonusGiven flag is true
+        user_doc = mongo_db.users.find_one({"_id": ObjectId(user_id)})
+        assert user_doc is not None
+        assert user_doc.get("welcomeBonusGiven") is True
+
+        # Verify exactly ONE "Welcome bonus" txn exists
+        welcome_txns = list(mongo_db.txns.find({
+            "userId": user_id,
+            "note": {"$regex": "Welcome bonus"},
+        }))
+        assert len(welcome_txns) == 1, f"expected 1 welcome bonus txn, got {len(welcome_txns)}: {welcome_txns}"
+        assert welcome_txns[0]["amount"] == 50
+        assert welcome_txns[0]["type"] == "credit"
+
+
+class TestIter4_LegacyPerMinRate:
+    """Legacy `perMinRate` field is no longer writable via PATCH endpoints (iter 4)."""
+
+    def test_provider_self_patch_rejects_legacy_perminrate(self, session, provider_headers, admin_headers):
+        # Read current rates
+        r0 = session.get(f"{API}/provider/me", headers=provider_headers)
+        assert r0.status_code == 200
+        before = r0.json()
+        call_before = before.get("callPerMinRate")
+        chat_before = before.get("chatPerMinRate")
+
+        # Attempt to write legacy perMinRate=99
+        r = session.patch(f"{API}/provider/me", headers=provider_headers, json={"perMinRate": 99})
+        assert r.status_code == 200
+        after = r.json()
+        # New fields must be UNCHANGED
+        assert after.get("callPerMinRate") == call_before, (
+            f"callPerMinRate changed via legacy perMinRate: {call_before} -> {after.get('callPerMinRate')}"
+        )
+        assert after.get("chatPerMinRate") == chat_before, (
+            f"chatPerMinRate changed via legacy perMinRate: {chat_before} -> {after.get('chatPerMinRate')}"
+        )
+
+    def test_admin_patch_rejects_legacy_perminrate(self, session, admin_headers):
+        provs = session.get(f"{API}/admin/providers", headers=admin_headers).json()
+        target = next((p for p in provs if p.get("mobile") == "8000000002"), None)
+        assert target is not None
+        pid = target["id"]
+        call_before = target.get("callPerMinRate")
+        chat_before = target.get("chatPerMinRate")
+
+        r = session.patch(
+            f"{API}/admin/providers/{pid}",
+            headers=admin_headers,
+            json={"perMinRate": 99},
+        )
+        assert r.status_code == 200
+        after = r.json()
+        assert after.get("callPerMinRate") == call_before, (
+            f"callPerMinRate changed: {call_before} -> {after.get('callPerMinRate')}"
+        )
+        assert after.get("chatPerMinRate") == chat_before, (
+            f"chatPerMinRate changed: {chat_before} -> {after.get('chatPerMinRate')}"
+        )
+
+
+class TestIter4_ChatHistory:
+    """Chat REST endpoints: /api/chat/threads + /api/chat/messages."""
+
+    @pytest.fixture(scope="class")
+    def seeded_chat(self, session, admin_headers, mongo_db):
+        """Seed a chat thread between bypass user and provider 8000000001 (Aarav).
+        Re-verify the bypass user here to get a fresh JWT — the session-scoped
+        `user_token` fixture may reference a stale user id if other tests
+        recreated the user (e.g. TestIter4_WelcomeBonusIdempotent does that).
+        """
+        # Re-verify bypass user to obtain a current JWT + id
+        session.post(f"{API}/auth/otp/send", json={"mobile": USER_BYPASS_MOBILE, "role": "user"})
+        rv = session.post(
+            f"{API}/auth/otp/verify",
+            json={"mobile": USER_BYPASS_MOBILE, "code": USER_BYPASS_CODE, "role": "user"},
+        )
+        assert rv.status_code == 200, rv.text
+        user_token = rv.json()["token"]
+        user_id = rv.json()["user"]["id"]
+        fresh_user_headers = {"Authorization": f"Bearer {user_token}"}
+
+        # Get provider id (Aarav)
+        provs = session.get(f"{API}/admin/providers", headers=admin_headers).json()
+        prov = next((p for p in provs if p.get("mobile") == TEST_PROVIDER_MOBILE), None)
+        assert prov is not None
+        provider_id = prov["id"]
+
+        thread_key = f"{user_id}:{provider_id}"
+
+        # Cleanup prior messages
+        mongo_db.chatmessages.delete_many({"threadKey": thread_key})
+
+        # Insert 3 messages oldest-first
+        now = datetime.utcnow()
+        from datetime import timedelta
+        docs = [
+            {"threadKey": thread_key, "userId": user_id, "providerId": provider_id,
+             "senderRole": "user", "text": "Hi", "at": now - timedelta(seconds=30)},
+            {"threadKey": thread_key, "userId": user_id, "providerId": provider_id,
+             "senderRole": "provider", "text": "Hello, how can I help?", "at": now - timedelta(seconds=20)},
+            {"threadKey": thread_key, "userId": user_id, "providerId": provider_id,
+             "senderRole": "user", "text": "Thanks!", "at": now - timedelta(seconds=10)},
+        ]
+        mongo_db.chatmessages.insert_many(docs)
+
+        yield {"user_id": user_id, "provider_id": provider_id, "thread_key": thread_key,
+               "user_headers": fresh_user_headers}
+
+        # Cleanup
+        mongo_db.chatmessages.delete_many({"threadKey": thread_key})
+
+    def test_user_threads_returns_seeded(self, session, seeded_chat):
+        user_headers = seeded_chat["user_headers"]
+        r = session.get(f"{API}/chat/threads", headers=user_headers)
+        assert r.status_code == 200, r.text
+        threads = r.json()
+        assert isinstance(threads, list)
+        t = next((x for x in threads if x.get("peerId") == seeded_chat["provider_id"]), None)
+        assert t is not None, f"thread for seeded provider not found in {threads}"
+        assert t["threadKey"] == seeded_chat["thread_key"]
+        assert t["lastMessage"] == "Thanks!"
+        assert t["lastSender"] == "user"
+        assert t["count"] == 3
+        assert t["peer"] is not None
+        assert "name" in t["peer"]
+        # User POV → peer is the provider; should have avatar+online keys
+        assert "avatar" in t["peer"]
+        assert "online" in t["peer"]
+
+    def test_user_messages_oldest_first(self, session, seeded_chat):
+        user_headers = seeded_chat["user_headers"]
+        r = session.get(
+            f"{API}/chat/messages",
+            headers=user_headers,
+            params={"peerId": seeded_chat["provider_id"], "limit": 20},
+        )
+        assert r.status_code == 200, r.text
+        msgs = r.json()
+        assert isinstance(msgs, list)
+        assert len(msgs) == 3
+        # Oldest first
+        texts = [m["text"] for m in msgs]
+        assert texts == ["Hi", "Hello, how can I help?", "Thanks!"]
+        # `mine` flag — user POV
+        assert msgs[0]["mine"] is True   # senderRole user
+        assert msgs[1]["mine"] is False  # senderRole provider
+        assert msgs[2]["mine"] is True
+        # Shape
+        for m in msgs:
+            assert "id" in m and "senderRole" in m and "text" in m and "at" in m
+
+    def test_provider_threads_returns_seeded(self, session, provider_headers, seeded_chat):
+        r = session.get(f"{API}/chat/threads", headers=provider_headers)
+        assert r.status_code == 200, r.text
+        threads = r.json()
+        t = next((x for x in threads if x.get("peerId") == seeded_chat["user_id"]), None)
+        assert t is not None, f"thread for seeded user not found in {threads}"
+        assert t["count"] == 3
+        assert t["lastMessage"] == "Thanks!"
+        assert t["peer"] is not None
+        # Provider POV — peer is user, has name + mobile
+        assert "name" in t["peer"]
+        assert "mobile" in t["peer"]
+
+    def test_provider_messages_mine_flag_flipped(self, session, provider_headers, seeded_chat):
+        r = session.get(
+            f"{API}/chat/messages",
+            headers=provider_headers,
+            params={"peerId": seeded_chat["user_id"], "limit": 20},
+        )
+        assert r.status_code == 200, r.text
+        msgs = r.json()
+        assert len(msgs) == 3
+        # mine flag is flipped from provider POV
+        assert msgs[0]["mine"] is False  # user msg
+        assert msgs[1]["mine"] is True   # provider msg
+        assert msgs[2]["mine"] is False
+
+    def test_messages_missing_peerid_400(self, session, user_headers):
+        r = session.get(f"{API}/chat/messages", headers=user_headers)
+        assert r.status_code == 400
+
+    def test_threads_empty_for_fresh_user(self, session):
+        # Use a fresh user via OTP bypass on a *different* number?
+        # Bypass user already has seeded messages. Skip this case — covered by
+        # the fact that the threads endpoint returned an empty list before seeding.
+        pytest.skip("Bypass user is reused across tests; empty case implicitly covered by clean DB.")

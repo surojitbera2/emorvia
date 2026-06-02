@@ -18,6 +18,8 @@ import ProviderCallScreen from "@/pages/ProviderCallScreen";
 import ProviderChatScreen from "@/pages/ProviderChatScreen";
 import AdminLogin from "@/pages/AdminLogin";
 import AdminLayout from "@/pages/AdminLayout";
+import ProviderAuth from "@/pages/ProviderAuth";
+import ChatHistory from "@/pages/ChatHistory";
 
 function App() {
   return (
@@ -25,17 +27,19 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Welcome />} />
-          {/* OTP-only auth — single entry */}
+          {/* OTP-only auth — user flow */}
           <Route path="/register" element={<Register />} />
           <Route path="/login" element={<Navigate to="/register" replace />} />
-          <Route path="/provider/login" element={<Navigate to="/register" replace />} />
-          <Route path="/provider/register" element={<Navigate to="/register" replace />} />
+          {/* OTP-only auth — listener (provider) flow has dedicated pages */}
+          <Route path="/provider/register" element={<ProviderAuth mode="register" />} />
+          <Route path="/provider/login" element={<ProviderAuth mode="login" />} />
 
           {/* User app */}
           <Route path="/app" element={<UserDashboard />} />
           <Route path="/provider/:id" element={<ProviderProfile />} />
           <Route path="/call/:id" element={<CallScreen />} />
           <Route path="/chat/:id" element={<ChatScreen />} />
+          <Route path="/chats" element={<ChatHistory />} />
           <Route path="/wallet" element={<Wallet />} />
           <Route path="/recharge" element={<Recharge />} />
           <Route path="/profile" element={<UserProfile />} />
@@ -48,6 +52,7 @@ function App() {
           <Route path="/provider/profile/edit" element={<ProviderProfileEdit />} />
           <Route path="/provider/call/:userId" element={<ProviderCallScreen />} />
           <Route path="/provider/chat/:userId" element={<ProviderChatScreen />} />
+          <Route path="/provider/chats" element={<ChatHistory />} />
 
           {/* Admin */}
           <Route path="/admin/login" element={<AdminLogin />} />

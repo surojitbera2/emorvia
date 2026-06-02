@@ -114,7 +114,7 @@ export default function Welcome() {
         </div>
 
         {/* Footer */}
-        <div className="relative z-10 px-6 mt-6 pb-10 fade-up delay-3">
+        <div className="relative z-10 px-6 mt-6 pb-10 fade-up delay-3 space-y-3">
           <div className="flex items-center justify-center gap-2 text-[11px] text-[#6E7694]">
             <span>By continuing you agree to our</span>
             <a
@@ -126,6 +126,23 @@ export default function Welcome() {
             >
               Privacy Policy
             </a>
+          </div>
+          <div className="flex items-center justify-center gap-3 text-[11px]">
+            <Link
+              to="/provider/login"
+              data-testid="welcome-listener-login"
+              className="text-[#A9B1CC] hover:text-[#3DDC97] transition-colors"
+            >
+              Listener sign in
+            </Link>
+            <span className="text-[#6E7694]">·</span>
+            <Link
+              to="/provider/register"
+              data-testid="welcome-listener-register"
+              className="text-[#3DDC97] font-semibold hover:underline"
+            >
+              Become a listener
+            </Link>
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Phone, TrendingUp, X, Check, BellRing, UserCog, Hourglass } from "lucide-react";
+import { LogOut, Phone, TrendingUp, X, Check, BellRing, UserCog, Hourglass, MessageCircle } from "lucide-react";
 import { MobileShell, GlassHeader, BottomNav, PrimaryButton } from "../components/MobileShell";
 import InstallAppPrompt from "../components/InstallAppPrompt";
 import { api } from "../lib/store";
@@ -26,7 +26,7 @@ export default function ProviderHome() {
       try {
         const p = await api.getProviderMe();
         setMe(p); onlineRef.current = p.online;
-        signaling.connect(p.id);
+        signaling.connect(p.id, "provider");
       } catch (e) {
         // Only clear session on real auth failure — keep the user logged in across
         // network blips / server restarts.
@@ -104,7 +104,7 @@ export default function ProviderHome() {
   // When tab becomes visible again, ensure socket is reconnected (WebView throttling)
   useEffect(() => {
     const onVis = () => {
-      if (!document.hidden && me?.id) signaling.connect(me.id);
+      if (!document.hidden && me?.id) signaling.connect(me.id, "provider");
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
@@ -171,7 +171,10 @@ export default function ProviderHome() {
       <Toaster theme="dark" position="top-center" />
       <InstallAppPrompt />
       <GlassHeader title="Provider" right={
-        <button data-testid="provider-logout" onClick={() => { clearSession(); nav("/"); }} className="p-2 rounded-lg hover:bg-white/5"><LogOut className="w-4 h-4" /></button>
+        <div className="flex items-center gap-1">
+          <button data-testid="provider-chats" onClick={() => nav("/provider/chats")} className="p-2 rounded-lg hover:bg-white/5" title="My chats"><MessageCircle className="w-4 h-4 text-[#3DDC97]" /></button>
+          <button data-testid="provider-logout" onClick={() => { clearSession(); nav("/"); }} className="p-2 rounded-lg hover:bg-white/5"><LogOut className="w-4 h-4" /></button>
+        </div>
       } />
       <div className="px-5 pt-6 pb-32 space-y-5">
         {me.status === "pending" && (

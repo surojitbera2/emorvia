@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Wallet as WalletIcon, ArrowRight } from "lucide-react";
+import { Search, Wallet as WalletIcon, ArrowRight, MessageCircle } from "lucide-react";
 import { MobileShell, GlassHeader, BottomNav } from "../components/MobileShell";
 import { api } from "../lib/store";
 import { getSession } from "../lib/auth";
@@ -37,10 +37,15 @@ export default function UserDashboard() {
       <GlassHeader
         title="EMORVIA"
         right={
-          <button data-testid="header-wallet" onClick={() => nav("/wallet")} className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#6FA8FF]/10 border border-[#6FA8FF]/20 text-[#6FA8FF]">
-            <WalletIcon className="w-3.5 h-3.5" />
-            <span className="text-xs font-semibold">{inr(user.wallet)}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button data-testid="header-chats" onClick={() => nav("/chats")} className="p-2 rounded-full bg-[#3DDC97]/10 border border-[#3DDC97]/20 text-[#3DDC97]" title="My chats">
+              <MessageCircle className="w-3.5 h-3.5" />
+            </button>
+            <button data-testid="header-wallet" onClick={() => nav("/wallet")} className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#6FA8FF]/10 border border-[#6FA8FF]/20 text-[#6FA8FF]">
+              <WalletIcon className="w-3.5 h-3.5" />
+              <span className="text-xs font-semibold">{inr(user.wallet)}</span>
+            </button>
+          </div>
         }
       />
       <div className="px-5 pt-5 pb-32">

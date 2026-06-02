@@ -54,7 +54,7 @@ export default function CallScreen() {
   useEffect(() => {
     const s = getSession();
     if (!s || s.role !== "user") { nav("/register"); return; }
-    signaling.connect(s.id);
+    signaling.connect(s.id, "user");
     let mounted = true;
     let retryTimer = null;
     let timeoutTimer = null;

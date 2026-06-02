@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 4 testing complete. All 4 new feature areas validated end-to-end via pytest (41 passed, 1 skipped — intentional) + Playwright. Backend: per-mobile OTP send cooldown (60s, with 429 + retryAfter + Retry-After header), bypass accounts immune to cooldown, idempotent welcome bonus (User.welcomeBonusGiven flag, exactly one 'Welcome bonus' txn even on repeat verify), legacy perMinRate field rejected by both PATCH /api/provider/me and PATCH /api/admin/providers/:id, and GET /api/chat/threads + /api/chat/messages return correctly-shaped data for both user POV and provider POV (with `mine` flag flipped accordingly). Frontend: Welcome page footer 'Listener sign in · Become a listener' links present (data-testid welcome-listener-login / welcome-listener-register), /provider/register loads with 'Become a Listener' + 'Earn as a Listener' copy and emerald theme, /provider/login loads with 'Listener sign in' copy and a link back to /provider/register, User Dashboard has header-chats button → /chats works, Provider Home has provider-chats button → /provider/chats works, ChatHistory empty state renders.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Provider header on /provider", "issues": ["No issues found. provider-chats button visible and works."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_emorvia_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Empty-state CTA copy on user /chats page says 'Tap Start Chat on any listener\\'s profile.' — consider linking to /discover."
+  ],
+  "critical_code_review_comments": [
+    "OTP cooldown returns 429 with both JSON body {error, retryAfter} and a proper Retry-After header — clean.",
+    "Welcome bonus idempotency relies on the new User.welcomeBonusGiven flag AND a Txns insert; both updates are persisted atomically per request in the verify route — verified by GET-after-POST.",
+    "Legacy perMinRate is correctly *readable* (for backward compat in older clients) but no longer *writable* through either provider or admin PATCH endpoints. Field is also no longer auto-mirrored when callPerMinRate changes — confirmed.",
+    "GET /api/chat/threads correctly returns provider-POV peer object with mobile field (admin-style identity) and user-POV peer with avatar+online — schema matches problem statement.",
+    "GET /api/chat/messages oldest-first ordering verified; `mine` flag correctly inverts between user and provider tokens; missing peerId returns 400."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_emorvia_backend.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": {
+    "admin": "admindash / Admin#2026*",
+    "user_otp_bypass": "7777777777 / 2411",
+    "provider_otp_bypass": "6666666666 / 0401",
+    "legacy_provider_password_login": "8000000001 / pro123"
+  },
+  "seed_data_creation": "TestIter4_ChatHistory.seeded_chat fixture inserts 3 chatmessages docs (bypass user <-> provider 8000000001 Aarav) and tears them down on class exit. It also re-verifies the bypass user inside the fixture to obtain a fresh JWT, because TestIter4_WelcomeBonusIdempotent deletes & recreates the bypass user which invalidates the session-scoped user_token.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 1-4 regression suite is in /app/backend/tests/test_emorvia_backend.py (42 tests). Legacy iter-1/2 tests that used to write {perMinRate: X} have been updated to write {callPerMinRate: X} since iter 4 removed legacy field writability. The chatmessages collection in DB 'emorvia' is the source of truth for chat history. Bypass mobile 7777777777 may be repeatedly deleted/recreated by welcome-bonus test; if subsequent tests need user identity, re-verify inside the test rather than relying on the session-scoped user_token fixture. For OTP cooldown tests use a fresh '5xxxxxxxxx' mobile each run to avoid colliding with prior Otp records (the fixture handles cleanup but a fresh mobile is safer).",
+  "rca_of_the_issue": "N/A — all expected behaviors confirmed."
+}

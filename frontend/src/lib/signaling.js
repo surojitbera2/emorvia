@@ -19,6 +19,7 @@ const EVENTS = [
 const listeners = new Map(); // eventName -> Set<fn>
 let socket = null;
 let myId = null;
+let myRole = null;
 let readyResolvers = [];
 
 const ensureSocket = () => {
@@ -30,7 +31,7 @@ const ensureSocket = () => {
     reconnectionDelayMax: 5000,
   });
   socket.on("connect", () => {
-    if (myId) socket.emit("register", { id: myId });
+    if (myId) socket.emit("register", { id: myId, role: myRole });
     readyResolvers.forEach((r) => r());
     readyResolvers = [];
   });
@@ -44,12 +45,13 @@ const ensureSocket = () => {
 };
 
 export const signaling = {
-  connect(id) {
+  connect(id, role) {
     if (!id) return;
-    if (myId === id && socket && socket.connected) return;
+    if (myId === id && myRole === role && socket && socket.connected) return;
     myId = id;
+    myRole = role || myRole || "user";
     const s = ensureSocket();
-    if (s.connected) s.emit("register", { id });
+    if (s.connected) s.emit("register", { id, role: myRole });
   },
   disconnect() {
     myId = null;

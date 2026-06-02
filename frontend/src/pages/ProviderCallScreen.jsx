@@ -57,7 +57,7 @@ export default function ProviderCallScreen() {
         setPerMinRate(Math.max(0, Number(provider?.perMinRate) || 0));
         setCaller({ id: userId, name: "User" });
         meRef.current = provider; userIdRef.current = userId;
-        signaling.connect(provider.id);
+        signaling.connect(provider.id, "provider");
       } catch { nav("/register"); }
     })();
     let mounted = true;

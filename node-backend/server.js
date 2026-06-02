@@ -112,6 +112,9 @@ const UserSchema = new mongoose.Schema({
   password: String,
   wallet: { type: Number, default: 0 },
   bonusBalance: { type: Number, default: 0 },
+  // Idempotency flag — set the first time a welcome bonus is credited so repeat
+  // OTP-verifies (or any other onboarding event) for the same mobile never re-grant it.
+  welcomeBonusGiven: { type: Boolean, default: false, index: true },
   createdAt: { type: Date, default: Date.now },
 }, { toJSON: { transform }, toObject: { transform } });
 
@@ -127,8 +130,8 @@ const ProviderSchema = new mongoose.Schema({
   // Both provider and admin can set/edit independently.
   callPerMinRate: { type: Number, default: 20 },
   chatPerMinRate: { type: Number, default: 10 },
-  // Legacy field — kept for backward compat / migration (old code wrote this).
-  // If a fresh provider has only `perMinRate`, it's mirrored into callPerMinRate on read.
+  // DEPRECATED — only kept so the runtime can still read very old records.
+  // No code writes to this field anymore (since iter 4).
   perMinRate: { type: Number, default: 20 },
   // Optional per-provider payout share override (%). If null, falls back to global providerSharePct.
   sharePctOverride: { type: Number, default: null },
@@ -211,6 +214,20 @@ const PayoutSchema = new mongoose.Schema({
   at: { type: Date, default: Date.now },
 }, { toJSON: { transform }, toObject: { transform } });
 
+// ChatMessage — persisted text exchanges between a user and a provider.
+// Indexed by the participants pair so threads can be loaded efficiently.
+const ChatMessageSchema = new mongoose.Schema({
+  // Sorted "userId:providerId" key for thread retrieval.
+  threadKey: { type: String, index: true },
+  userId: { type: String, index: true },
+  providerId: { type: String, index: true },
+  // Who actually sent it: "user" or "provider".
+  senderRole: { type: String, enum: ["user", "provider"], required: true },
+  text: { type: String, required: true },
+  at: { type: Date, default: Date.now, index: true },
+}, { toJSON: { transform }, toObject: { transform } });
+ChatMessageSchema.index({ threadKey: 1, at: -1 });
+
 const User = mongoose.model("User", UserSchema);
 const Provider = mongoose.model("Provider", ProviderSchema);
 const Txn = mongoose.model("Txn", TxnSchema);
@@ -220,6 +237,9 @@ const Settings = mongoose.model("Settings", SettingsSchema);
 const Otp = mongoose.model("Otp", OtpSchema);
 const PushSub = mongoose.model("PushSub", PushSubSchema);
 const Payout = mongoose.model("Payout", PayoutSchema);
+const ChatMessage = mongoose.model("ChatMessage", ChatMessageSchema);
+
+const threadKeyOf = (userId, providerId) => `${userId}:${providerId}`;
 
 // ----- Auth -----
 // Long-lived tokens — users/providers/admin stay logged in until they explicitly sign out.
@@ -244,27 +264,42 @@ const sanitizeMobile = (m) => String(m || "").replace(/\D/g, "").slice(-10);
 
 // Send OTP to a mobile (works for both user and provider). The role determines
 // which account type will be created on verify if it doesn't already exist.
+// Enforces a 60-second per-(mobile, role) cooldown to prevent SMS abuse.
+const OTP_COOLDOWN_MS = 60 * 1000;
+
 app.post("/api/auth/otp/send", async (req, res) => {
   try {
     const mobile = sanitizeMobile(req.body?.mobile);
     const role = req.body?.role === "provider" ? "provider" : "user";
     if (mobile.length !== 10) return res.status(400).json({ error: "Enter a valid 10-digit mobile" });
 
-    // Bypass OTP sending for test accounts
+    // Bypass OTP sending for test accounts (no cooldown applied)
     const bypassAccounts = ["7777777777", "6666666666"];
 
     if (bypassAccounts.includes(mobile)) {
-      // Bypass mode: skip actual SMS sending
       console.log(`Bypass OTP send for test account ${mobile}`);
-      // Create a dummy verification record so the flow continues
       await Otp.findOneAndUpdate({ mobile, role }, { verificationId: `bypass_${mobile}`, at: new Date() }, { upsert: true });
-      res.json({ ok: true });
-    } else {
-      // Normal mode: send actual OTP via MessageCentral
-      const verificationId = await sendOtpSms(mobile);
-      await Otp.findOneAndUpdate({ mobile, role }, { verificationId, at: new Date() }, { upsert: true });
-      res.json({ ok: true });
+      return res.json({ ok: true });
     }
+
+    // Cooldown check — if we sent an OTP for this (mobile, role) less than 60s ago, reject.
+    const last = await Otp.findOne({ mobile, role });
+    if (last && last.at) {
+      const elapsed = Date.now() - new Date(last.at).getTime();
+      if (elapsed < OTP_COOLDOWN_MS) {
+        const retryAfter = Math.ceil((OTP_COOLDOWN_MS - elapsed) / 1000);
+        res.set("Retry-After", String(retryAfter));
+        return res.status(429).json({
+          error: `Please wait ${retryAfter}s before requesting another OTP`,
+          retryAfter,
+        });
+      }
+    }
+
+    // Normal mode: send actual OTP via MessageCentral
+    const verificationId = await sendOtpSms(mobile);
+    await Otp.findOneAndUpdate({ mobile, role }, { verificationId, at: new Date() }, { upsert: true });
+    res.json({ ok: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -321,14 +356,21 @@ app.post("/api/auth/otp/verify", async (req, res) => {
     let u = await User.findOne({ mobile });
     let isNew = false;
     if (!u) {
+      // First-time mobile: create user and grant welcome bonus exactly once.
+      const giveBonus = WELCOME_BONUS > 0;
       u = await User.create({
         mobile,
         name: `User${mobile.slice(-4)}`,
-        wallet: WELCOME_BONUS,
-        bonusBalance: WELCOME_BONUS,
+        wallet: giveBonus ? WELCOME_BONUS : 0,
+        bonusBalance: giveBonus ? WELCOME_BONUS : 0,
+        welcomeBonusGiven: giveBonus,
       });
-      if (WELCOME_BONUS > 0) await Txn.create({ userId: u._id.toString(), type: "credit", amount: WELCOME_BONUS, note: "Welcome bonus (free trial credit)" });
+      if (giveBonus) await Txn.create({ userId: u._id.toString(), type: "credit", amount: WELCOME_BONUS, note: "Welcome bonus (free trial credit)" });
       isNew = true;
+    } else if (!u.welcomeBonusGiven && WELCOME_BONUS > 0) {
+      // Edge case: user exists but the flag isn't set (legacy records).
+      // Mark the flag without crediting again — they already either consumed or got the bonus historically.
+      await User.updateOne({ _id: u._id }, { $set: { welcomeBonusGiven: true } });
     }
     const token = sign({ id: u._id.toString(), role: "user" });
     return res.json({ token, user: u.toJSON(), isNew });
@@ -342,7 +384,14 @@ app.post("/api/auth/register", async (req, res) => {
     if (!mobile || !password) return res.status(400).json({ error: "mobile and password required" });
     if (await User.findOne({ mobile })) return res.status(409).json({ error: "mobile already registered" });
     const hash = await bcrypt.hash(password, 10);
-    const u = await User.create({ name: name || `User${mobile.slice(-4)}`, mobile, password: hash, wallet: WELCOME_BONUS, bonusBalance: WELCOME_BONUS });
+    const u = await User.create({
+      name: name || `User${mobile.slice(-4)}`,
+      mobile,
+      password: hash,
+      wallet: WELCOME_BONUS,
+      bonusBalance: WELCOME_BONUS,
+      welcomeBonusGiven: WELCOME_BONUS > 0,
+    });
     if (WELCOME_BONUS > 0) await Txn.create({ userId: u._id.toString(), type: "credit", amount: WELCOME_BONUS, note: "Welcome bonus (free trial credit)" });
     const token = sign({ id: u._id.toString(), role: "user" });
     res.json({ token, user: u.toJSON() });
@@ -601,6 +650,89 @@ app.post("/api/call/log", auth("user"), async (req, res) => {
   }
 });
 
+// ===== Chat REST APIs (persisted message history) =====
+
+// Get chat threads for the current user / provider — most recent first.
+app.get("/api/chat/threads", auth(), async (req, res) => {
+  try {
+    const isProvider = req.user.role === "provider";
+    const match = isProvider ? { providerId: req.user.id } : { userId: req.user.id };
+
+    const threads = await ChatMessage.aggregate([
+      { $match: match },
+      { $sort: { at: -1 } },
+      { $group: {
+        _id: "$threadKey",
+        userId: { $first: "$userId" },
+        providerId: { $first: "$providerId" },
+        lastMessage: { $first: "$text" },
+        lastAt: { $first: "$at" },
+        lastSender: { $first: "$senderRole" },
+        count: { $sum: 1 },
+      }},
+      { $sort: { lastAt: -1 } },
+      { $limit: 50 },
+    ]);
+
+    const peerIds = threads.map((t) => isProvider ? t.userId : t.providerId);
+    const peers = {};
+    if (isProvider) {
+      const users = await User.find({ _id: { $in: peerIds } }).select("name mobile").lean();
+      users.forEach((u) => { peers[u._id.toString()] = { name: u.name, mobile: u.mobile }; });
+    } else {
+      const provs = await Provider.find({ _id: { $in: peerIds } }).select("name avatar avatars online").lean();
+      provs.forEach((p) => {
+        peers[p._id.toString()] = {
+          name: p.name,
+          avatar: p.avatar || (Array.isArray(p.avatars) && p.avatars[0]) || "",
+          online: !!p.online,
+        };
+      });
+    }
+
+    res.json(threads.map((t) => {
+      const peerId = isProvider ? t.userId : t.providerId;
+      return {
+        threadKey: t._id,
+        peerId,
+        peer: peers[peerId] || null,
+        lastMessage: t.lastMessage,
+        lastAt: t.lastAt,
+        lastSender: t.lastSender,
+        count: t.count,
+      };
+    }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get message history with a specific peer (most recent N messages).
+app.get("/api/chat/messages", auth(), async (req, res) => {
+  try {
+    const peerId = String(req.query.peerId || "");
+    if (!peerId) return res.status(400).json({ error: "peerId required" });
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
+    const isProvider = req.user.role === "provider";
+    const userId = isProvider ? peerId : req.user.id;
+    const providerId = isProvider ? req.user.id : peerId;
+
+    const messages = await ChatMessage.find({ threadKey: threadKeyOf(userId, providerId) })
+      .sort({ at: -1 })
+      .limit(limit)
+      .lean();
+
+    res.json(messages.reverse().map((m) => ({
+      id: m._id.toString(),
+      senderRole: m.senderRole,
+      text: m.text,
+      at: m.at,
+      mine: isProvider ? m.senderRole === "provider" : m.senderRole === "user",
+    })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== End Chat REST APIs =====
+
+
 // Provider self
 app.get("/api/provider/me", auth("provider"), async (req, res) => {
   const p = await Provider.findById(req.user.id);
@@ -617,16 +749,11 @@ app.patch("/api/provider/me", auth("provider"), async (req, res) => {
   // Provider can set their own per-minute rates (separate for call and chat).
   if (body.callPerMinRate != null && body.callPerMinRate !== "") {
     const r = Math.max(1, Math.min(1000, Math.round(Number(body.callPerMinRate) || 0)));
-    if (r > 0) { patch.callPerMinRate = r; patch.perMinRate = r; /* keep legacy mirror */ }
+    if (r > 0) patch.callPerMinRate = r;
   }
   if (body.chatPerMinRate != null && body.chatPerMinRate !== "") {
     const r = Math.max(1, Math.min(1000, Math.round(Number(body.chatPerMinRate) || 0)));
     if (r > 0) patch.chatPerMinRate = r;
-  }
-  // Legacy alias — kept so older clients still work.
-  if (body.perMinRate != null && body.callPerMinRate == null) {
-    const r = Math.max(1, Math.min(1000, Math.round(Number(body.perMinRate) || 0)));
-    if (r > 0) { patch.callPerMinRate = r; patch.perMinRate = r; }
   }
   if (Array.isArray(body.avatars)) {
     patch.avatars = body.avatars.filter((u) => typeof u === "string" && u).slice(0, 8);
@@ -764,16 +891,10 @@ app.patch("/api/admin/providers/:id", auth("admin"), async (req, res) => {
   if (body.callPerMinRate != null && body.callPerMinRate !== "") {
     const r = Math.max(0, Math.min(10000, Math.round(Number(body.callPerMinRate) || 0)));
     patch.callPerMinRate = r;
-    patch.perMinRate = r; // keep legacy field in sync
   }
   if (body.chatPerMinRate != null && body.chatPerMinRate !== "") {
     const r = Math.max(0, Math.min(10000, Math.round(Number(body.chatPerMinRate) || 0)));
     patch.chatPerMinRate = r;
-  }
-  if (body.perMinRate != null && body.perMinRate !== "" && body.callPerMinRate == null) {
-    const r = Math.max(0, Math.min(10000, Math.round(Number(body.perMinRate) || 0)));
-    patch.callPerMinRate = r;
-    patch.perMinRate = r;
   }
   // Admin per-provider payout override (% to provider). Pass null/"" to clear and use global default.
   if ("sharePctOverride" in body) {
@@ -1621,12 +1742,13 @@ const findActiveCall = (a, b) => {
 io.on("connection", (socket) => {
 
   // REGISTER
-  socket.on("register", ({ id }) => {
+  socket.on("register", ({ id, role }) => {
     if (!id) return;
 
     sockets.set(id, socket.id);
 
     socket.data.id = id;
+    socket.data.role = role === "provider" ? "provider" : "user";
 
     flushOutbox(id, socket);
 
@@ -2137,19 +2259,39 @@ io.on("connection", (socket) => {
     }
   });
 
-  // CHAT MESSAGE  (forward text in real time)
-  socket.on("chat_message", (msg = {}) => {
+  // CHAT MESSAGE  (forward text in real time AND persist)
+  socket.on("chat_message", async (msg = {}) => {
     const to = msg.to;
     const from = socket.data.id;
     if (!to || !from) return;
     const text = String(msg.text || "").slice(0, 1000);
     if (!text) return;
+
+    // Determine user / provider IDs based on who is sending.
+    const senderRole = socket.data.role === "provider" ? "provider" : "user";
+    const userId = senderRole === "user" ? from : to;
+    const providerId = senderRole === "user" ? to : from;
+    const at = new Date();
+
+    // Forward live
     deliver("chat_message", to, {
       from,
       text,
-      at: Date.now(),
+      at: at.getTime(),
       tempId: msg.tempId || null,
     });
+
+    // Persist (fire-and-forget — never block delivery on DB)
+    try {
+      await ChatMessage.create({
+        threadKey: threadKeyOf(userId, providerId),
+        userId,
+        providerId,
+        senderRole,
+        text,
+        at,
+      });
+    } catch (e) { console.error("chat_message persist:", e.message); }
   });
 
   // TYPING indicator

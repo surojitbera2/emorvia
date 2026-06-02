@@ -59,6 +59,10 @@ export const api = {
   callLog: ({ providerId, durationSec, autoCutoff, channel }) =>
     unwrap(http.post("/api/call/log", { providerId, durationSec, autoCutoff, channel })),
 
+  // ----- chat history -----
+  chatThreads: () => unwrap(http.get("/api/chat/threads")),
+  chatMessages: (peerId, limit = 50) => unwrap(http.get(`/api/chat/messages?peerId=${encodeURIComponent(peerId)}&limit=${limit}`)),
+
   // ----- public catalog -----
   getProviders: () => unwrap(http.get("/api/providers")),
   getProvider: (id) => unwrap(http.get(`/api/providers/${id}`)),
