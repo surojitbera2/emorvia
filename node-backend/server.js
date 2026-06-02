@@ -3,8 +3,7 @@
 //   Auth:  POST /auth/register | /auth/login | /provider/login | /admin/login
 //   User:  GET /me | GET /me/txns | DELETE /me | POST /recharge | POST /call/log
 //   Public: GET /providers | GET /providers/:id | GET /payments/settings
-//   Provider self: GET /provider/me | PATCH /provider/me | DELETE /provider/me | GET /provider/me/calls
-//   Admin:
+//   Provider self: GET /provider/me | PATCH /provider/me | DELETE /provider/me | GET /provider/me/calls//   Admin:
 //     GET/POST/DELETE /admin/users | POST /admin/users/:id/adjust
 //     GET/POST/PATCH/DELETE /admin/providers
 //     GET /admin/recharges | POST /admin/recharges/:id/approve|reject
