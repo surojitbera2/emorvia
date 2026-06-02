@@ -130,6 +130,8 @@ const ProviderSchema = new mongoose.Schema({
   // Both provider and admin can set/edit independently.
   callPerMinRate: { type: Number, default: 20 },
   chatPerMinRate: { type: Number, default: 10 },
+  // Payout destination — UPI VPA (e.g. "name@upi"). Required before admin can disburse.
+  upiId: { type: String, default: "" },
   // DEPRECATED — only kept so the runtime can still read very old records.
   // No code writes to this field anymore (since iter 4).
   perMinRate: { type: Number, default: 20 },
@@ -650,7 +652,103 @@ app.post("/api/call/log", auth("user"), async (req, res) => {
   }
 });
 
-// ===== Chat REST APIs (persisted message history) =====
+// ===========================================================================
+//   External Payout integration (PHP gateway → Node)
+// ===========================================================================
+// Flow:
+//   1. PHP admin GETs /api/ext-payout/pending → list of providers with positive
+//      `earnings`, including their UPI VPA. Authenticated by X-Gateway-Secret.
+//   2. PHP admin clicks "Pay" → calls Cashfree Payouts V2 from PHP itself.
+//   3. After Cashfree returns success, PHP POSTs /api/ext-payout/complete with
+//      HMAC-signed body. Node creates a Payout doc and resets provider.earnings.
+//
+// All requests are authenticated by the same shared secret used for ext-payment
+// (stored under Settings key "extPayment"). HMAC-SHA256 over the request body.
+
+const extPaymentSettings = async () => {
+  const s = await Settings.findOne({ key: "extPayment" });
+  return s?.value || { enabled: false, sharedSecret: "" };
+};
+
+const verifyGatewaySignature = async (req) => {
+  const cfg = await extPaymentSettings();
+  if (!cfg.sharedSecret) return { ok: false, error: "ext payout not configured" };
+  // Two auth modes: simple header (for GET) and HMAC-signed (for POST).
+  const headerSecret = req.headers["x-gateway-secret"];
+  if (req.method === "GET") {
+    return headerSecret === cfg.sharedSecret
+      ? { ok: true }
+      : { ok: false, error: "invalid gateway secret" };
+  }
+  const sig = req.headers["x-gateway-signature"];
+  if (!sig) return { ok: false, error: "missing X-Gateway-Signature" };
+  const raw = JSON.stringify(req.body || {});
+  const expected = crypto.createHmac("sha256", cfg.sharedSecret).update(raw).digest("hex");
+  return sig === expected ? { ok: true } : { ok: false, error: "signature mismatch" };
+};
+
+// List providers with pending earnings (the queue PHP admin pays from)
+app.get("/api/ext-payout/pending", async (req, res) => {
+  const v = await verifyGatewaySignature(req);
+  if (!v.ok) return res.status(401).json({ error: v.error });
+  const list = await Provider.find({ earnings: { $gt: 0 }, status: "active" })
+    .select("name mobile upiId earnings")
+    .sort({ earnings: -1 })
+    .limit(500)
+    .lean();
+  res.json(list.map((p) => ({
+    providerId: p._id.toString(),
+    name: p.name,
+    mobile: p.mobile,
+    upiId: p.upiId || "",
+    pendingAmount: Math.round(Number(p.earnings) || 0),
+  })));
+});
+
+// PHP calls this AFTER Cashfree returns SUCCESS for a transfer.
+// Body: {providerId, amount, transferId, cfTransferId, status, note}
+app.post("/api/ext-payout/complete", express.json(), async (req, res) => {
+  const v = await verifyGatewaySignature(req);
+  if (!v.ok) return res.status(401).json({ error: v.error });
+  const body = req.body || {};
+  const providerId = String(body.providerId || "");
+  const amount = Number(body.amount);
+  if (!providerId || !(amount > 0)) return res.status(400).json({ error: "providerId and positive amount required" });
+  const p = await Provider.findById(providerId);
+  if (!p) return res.status(404).json({ error: "provider not found" });
+
+  // Idempotency — if same transferId is sent twice, return the existing payout.
+  if (body.transferId) {
+    const existing = await Payout.findOne({ note: { $regex: String(body.transferId) } });
+    if (existing) return res.json({ ok: true, payout: existing, idempotent: true });
+  }
+
+  const noteParts = [];
+  if (body.transferId) noteParts.push(`txn:${body.transferId}`);
+  if (body.cfTransferId) noteParts.push(`cf:${body.cfTransferId}`);
+  noteParts.push("via:Cashfree");
+  if (body.note) noteParts.push(String(body.note).slice(0, 100));
+
+  const payout = await Payout.create({
+    providerId,
+    providerName: p.name,
+    amount: Math.round(amount * 100) / 100,
+    note: noteParts.join(" | ").slice(0, 200),
+  });
+  // Decrement (not reset) so concurrent partial payouts work safely.
+  await Provider.updateOne(
+    { _id: providerId },
+    { $inc: { earnings: -amount } }
+  );
+  // Floor earnings at 0 in case of rounding drift
+  await Provider.updateOne(
+    { _id: providerId, earnings: { $lt: 0 } },
+    { $set: { earnings: 0 } }
+  );
+  res.json({ ok: true, payout });
+});
+
+
 
 // Get chat threads for the current user / provider — most recent first.
 app.get("/api/chat/threads", auth(), async (req, res) => {
@@ -746,14 +844,21 @@ app.patch("/api/provider/me", auth("provider"), async (req, res) => {
   if (typeof body.name === "string") patch.name = body.name.trim().slice(0, 60);
   if (typeof body.bio === "string") patch.bio = body.bio.trim().slice(0, 300);
   if (body.age != null) patch.age = Math.max(18, Math.min(99, Number(body.age) || 18));
-  // Provider can set their own per-minute rates (separate for call and chat).
+  // UPI VPA for payouts
+  if (typeof body.upiId === "string") {
+    patch.upiId = body.upiId.trim().slice(0, 100);
+  }
+  // Per-minute rates — enforce admin-set min/max (default ₹20-₹80)
+  const { minRate, maxRate } = await getRateLimits();
   if (body.callPerMinRate != null && body.callPerMinRate !== "") {
-    const r = Math.max(1, Math.min(1000, Math.round(Number(body.callPerMinRate) || 0)));
-    if (r > 0) patch.callPerMinRate = r;
+    const r = Math.round(Number(body.callPerMinRate) || 0);
+    if (r < minRate || r > maxRate) return res.status(400).json({ error: `Video call rate must be between ₹${minRate} and ₹${maxRate} per minute` });
+    patch.callPerMinRate = r;
   }
   if (body.chatPerMinRate != null && body.chatPerMinRate !== "") {
-    const r = Math.max(1, Math.min(1000, Math.round(Number(body.chatPerMinRate) || 0)));
-    if (r > 0) patch.chatPerMinRate = r;
+    const r = Math.round(Number(body.chatPerMinRate) || 0);
+    if (r < minRate || r > maxRate) return res.status(400).json({ error: `Chat rate must be between ₹${minRate} and ₹${maxRate} per minute` });
+    patch.chatPerMinRate = r;
   }
   if (Array.isArray(body.avatars)) {
     patch.avatars = body.avatars.filter((u) => typeof u === "string" && u).slice(0, 8);
@@ -888,14 +993,19 @@ app.patch("/api/admin/providers/:id", auth("admin"), async (req, res) => {
   if (typeof body.realMeetEnabled === "boolean") patch.realMeetEnabled = body.realMeetEnabled;
   if (typeof body.videoCallEnabled === "boolean") patch.videoCallEnabled = body.videoCallEnabled;
   // Admin can also set/override the provider's per-minute rates (separate for call & chat).
+  const { minRate: adminMin, maxRate: adminMax } = await getRateLimits();
   if (body.callPerMinRate != null && body.callPerMinRate !== "") {
-    const r = Math.max(0, Math.min(10000, Math.round(Number(body.callPerMinRate) || 0)));
+    const r = Math.round(Number(body.callPerMinRate) || 0);
+    if (r < adminMin || r > adminMax) return res.status(400).json({ error: `Video call rate must be between ₹${adminMin} and ₹${adminMax}` });
     patch.callPerMinRate = r;
   }
   if (body.chatPerMinRate != null && body.chatPerMinRate !== "") {
-    const r = Math.max(0, Math.min(10000, Math.round(Number(body.chatPerMinRate) || 0)));
+    const r = Math.round(Number(body.chatPerMinRate) || 0);
+    if (r < adminMin || r > adminMax) return res.status(400).json({ error: `Chat rate must be between ₹${adminMin} and ₹${adminMax}` });
     patch.chatPerMinRate = r;
   }
+  // Admin can set provider's UPI VPA for payouts.
+  if (typeof body.upiId === "string") patch.upiId = body.upiId.trim().slice(0, 100);
   // Admin per-provider payout override (% to provider). Pass null/"" to clear and use global default.
   if ("sharePctOverride" in body) {
     if (body.sharePctOverride === null || body.sharePctOverride === "" || body.sharePctOverride === undefined) {
@@ -1200,13 +1310,42 @@ app.put("/api/admin/payments/settings", auth("admin"), async (req, res) => {
   res.json(s.value);
 });
 
-// ---------- Billing settings (global payout split) ----------
+// ---------- Rate limit settings (admin sets global min/max for per-min rates) ----------
+const DEFAULT_RATE_MIN = 20;
+const DEFAULT_RATE_MAX = 80;
+
+const getRateLimits = async () => {
+  const s = await Settings.findOne({ key: "rateLimits" });
+  const v = s?.value || {};
+  return {
+    minRate: Number.isFinite(Number(v.minRate)) ? Number(v.minRate) : DEFAULT_RATE_MIN,
+    maxRate: Number.isFinite(Number(v.maxRate)) ? Number(v.maxRate) : DEFAULT_RATE_MAX,
+  };
+};
+
 app.get("/api/billing/public", async (_req, res) => {
   const s = await Settings.findOne({ key: "billing" });
   const v = s?.value || {};
+  const limits = await getRateLimits();
   res.json({
     providerSharePct: Number(v.providerSharePct ?? DEFAULT_PROVIDER_SHARE_PCT),
+    minRate: limits.minRate,
+    maxRate: limits.maxRate,
   });
+});
+
+app.get("/api/admin/rate-limits", auth("admin"), async (_req, res) => {
+  res.json(await getRateLimits());
+});
+app.put("/api/admin/rate-limits", auth("admin"), async (req, res) => {
+  const minRate = Math.max(1, Math.min(10000, Math.round(Number(req.body?.minRate) || DEFAULT_RATE_MIN)));
+  const maxRate = Math.max(minRate, Math.min(10000, Math.round(Number(req.body?.maxRate) || DEFAULT_RATE_MAX)));
+  const s = await Settings.findOneAndUpdate(
+    { key: "rateLimits" },
+    { value: { minRate, maxRate } },
+    { upsert: true, new: true }
+  );
+  res.json(s.value);
 });
 app.get("/api/admin/billing", auth("admin"), async (_req, res) => {
   const s = await Settings.findOne({ key: "billing" });

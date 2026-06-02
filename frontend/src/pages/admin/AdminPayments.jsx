@@ -10,6 +10,7 @@ const DEFAULT_SHARE = 60;
 export default function AdminPayments() {
   const [settings, setSettings] = useState({ upi_id: "", qr_url: "" });
   const [billing, setBilling] = useState({ providerSharePct: DEFAULT_SHARE });
+  const [rateLimits, setRateLimits] = useState({ minRate: 20, maxRate: 80 });
   const [whatsapp, setWhatsapp] = useState({ whatsappNumber: "" });
   const [upi, setUpi] = useState({ upiId: "", upiName: "EMORVIA", qrCodeUrl: "" });
   const [ext, setExt] = useState({ enabled: false, gatewayUrl: "", sharedSecret: "", label: "UPI / Net Banking / Card" });
@@ -19,9 +20,10 @@ export default function AdminPayments() {
 
   const refresh = async () => {
     try {
-      const [s, b, w, u, e, q] = await Promise.all([
+      const [s, b, rl, w, u, e, q] = await Promise.all([
         api.getPaymentSettings(),
         api.adminGetBilling(),
+        api.adminGetRateLimits().catch(() => ({ minRate: 20, maxRate: 80 })),
         api.adminGetWhatsapp(),
         api.adminGetUpi(),
         api.adminGetExtPayment().catch(() => ({ enabled: false, gatewayUrl: "", sharedSecret: "", label: "UPI / Net Banking / Card" })),
@@ -29,6 +31,7 @@ export default function AdminPayments() {
       ]);
       setSettings(s);
       setBilling({ providerSharePct: Number(b?.providerSharePct ?? DEFAULT_SHARE) });
+      setRateLimits({ minRate: Number(rl?.minRate ?? 20), maxRate: Number(rl?.maxRate ?? 80) });
       setWhatsapp(w || { whatsappNumber: "" });
       setUpi(u || { upiId: "", upiName: "EMORVIA", qrCodeUrl: "" });
       setExt(e || { enabled: false, gatewayUrl: "", sharedSecret: "", label: "UPI / Net Banking / Card" });
@@ -172,6 +175,39 @@ export default function AdminPayments() {
 
         <button data-testid="save-billing" disabled={busy.billing} onClick={saveBilling} className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 bg-[#6FA8FF] text-[#101428] font-semibold rounded-xl hover:bg-[#5B92F5] disabled:opacity-50">
           <Save className="w-4 h-4" /> Save payout split
+        </button>
+      </section>
+
+      {/* Rate limits — admin sets global min/max ₹ per minute for providers */}
+      <section className="bg-[#171C33] border border-white/5 rounded-2xl p-5">
+        <div className="mb-4">
+          <h3 className="font-heading text-sm font-semibold tracking-wide uppercase text-[#A9B1CC]">Per-min rate limits</h3>
+          <p className="text-[11px] text-[#A9B1CC] mt-1">Providers can only set their own call/chat rate within this range. Default: ₹20-₹80.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Minimum (₹/min)</Label>
+            <Input data-testid="rate-min" type="number" min={1} max={10000} value={rateLimits.minRate}
+              onChange={(e) => setRateLimits({ ...rateLimits, minRate: e.target.value })} />
+          </div>
+          <div>
+            <Label>Maximum (₹/min)</Label>
+            <Input data-testid="rate-max" type="number" min={1} max={10000} value={rateLimits.maxRate}
+              onChange={(e) => setRateLimits({ ...rateLimits, maxRate: e.target.value })} />
+          </div>
+        </div>
+        <button data-testid="save-rate-limits"
+          disabled={busy.ratelimits}
+          onClick={async () => {
+            const minR = Math.max(1, Number(rateLimits.minRate) || 0);
+            const maxR = Math.max(minR, Number(rateLimits.maxRate) || 0);
+            setBusy((b) => ({ ...b, ratelimits: true }));
+            try { await api.adminSaveRateLimits({ minRate: minR, maxRate: maxR }); toast.success(`Rate limits saved: ₹${minR}–₹${maxR}/min`); }
+            catch (e) { toast.error(e.message); }
+            finally { setBusy((b) => ({ ...b, ratelimits: false })); }
+          }}
+          className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 bg-[#6FA8FF] text-[#101428] font-semibold rounded-xl hover:bg-[#5B92F5] disabled:opacity-50">
+          <Save className="w-4 h-4" /> Save rate limits
         </button>
       </section>
 

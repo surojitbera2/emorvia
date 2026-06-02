@@ -63,6 +63,10 @@ export const api = {
   chatThreads: () => unwrap(http.get("/api/chat/threads")),
   chatMessages: (peerId, limit = 50) => unwrap(http.get(`/api/chat/messages?peerId=${encodeURIComponent(peerId)}&limit=${limit}`)),
 
+  // ----- rate limits (admin global min/max for provider per-min rates) -----
+  adminGetRateLimits: () => unwrap(http.get("/api/admin/rate-limits")),
+  adminSaveRateLimits: ({ minRate, maxRate }) => unwrap(http.put("/api/admin/rate-limits", { minRate, maxRate })),
+
   // ----- public catalog -----
   getProviders: () => unwrap(http.get("/api/providers")),
   getProvider: (id) => unwrap(http.get(`/api/providers/${id}`)),

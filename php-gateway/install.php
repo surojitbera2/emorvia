@@ -52,12 +52,33 @@ try {
         $st->execute([DEFAULT_ADMIN_USER, password_hash(DEFAULT_ADMIN_PASS, PASSWORD_BCRYPT)]);
     }
 
-    // Seed gateway rows (disabled by default)
-    foreach (['cashfree', 'razorpay'] as $g) {
+    // Seed gateway rows (disabled by default).
+    // 'cashfree_payout' is a separate row because Payouts uses different API keys than PG.
+    foreach (['cashfree', 'razorpay', 'cashfree_payout'] as $g) {
         if (!gateway_get($g)) {
             gateway_save($g, ['enabled' => 0, 'mode' => 'test', 'key_id' => '', 'key_secret' => '', 'webhook_secret' => '']);
         }
     }
+
+    // Payouts table — tracks each Cashfree disbursement the admin sends.
+    $pdo->exec("CREATE TABLE IF NOT EXISTS payouts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        provider_id VARCHAR(64) NOT NULL,
+        provider_name VARCHAR(120) DEFAULT '',
+        upi_id VARCHAR(120) DEFAULT '',
+        amount DECIMAL(12,2) NOT NULL,
+        transfer_id VARCHAR(64) UNIQUE NOT NULL,
+        cf_transfer_id VARCHAR(64) DEFAULT '',
+        status VARCHAR(32) DEFAULT 'pending',
+        status_description TEXT,
+        node_notified TINYINT(1) DEFAULT 0,
+        node_response TEXT,
+        admin_user VARCHAR(64) DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_provider (provider_id),
+        INDEX idx_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
     echo "<h2>BongoBandhu Payment Gateway — Install Successful</h2>";
     echo "<p>Database tables created. Default admin user:</p>";

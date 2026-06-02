@@ -159,6 +159,7 @@ export default function AdminProviders() {
     callPerMinRate: p.callPerMinRate ?? p.perMinRate ?? 20,
     chatPerMinRate: p.chatPerMinRate ?? Math.max(1, Math.round((p.perMinRate ?? 20) / 2)),
     sharePctOverride: p.sharePctOverride ?? "",
+    upiId: p.upiId || "",
   });
   const saveEdit = async () => {
     if (!edit) return;
@@ -182,6 +183,7 @@ export default function AdminProviders() {
         sharePctOverride: edit.sharePctOverride === "" || edit.sharePctOverride === null
           ? null
           : Math.max(0, Math.min(100, Number(edit.sharePctOverride))),
+        upiId: edit.upiId || "",
       };
       if (edit.password) {
         payload.password = edit.password;

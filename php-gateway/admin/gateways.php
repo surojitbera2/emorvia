@@ -2,10 +2,16 @@
 require_once __DIR__ . '/../config.php';
 admin_require_login();
 
+$GATEWAYS = [
+    ['cashfree',        'Cashfree (Payments)',  'App ID',     'Secret Key'],
+    ['razorpay',        'Razorpay',             'Key ID',     'Key Secret'],
+    ['cashfree_payout', 'Cashfree Payouts V2',  'X-Client-Id','X-Client-Secret'],
+];
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    foreach (['cashfree', 'razorpay'] as $name) {
+    foreach ($GATEWAYS as [$name, ,]) {
         $cur = gateway_get($name) ?: [];
-        $incomingSecret = $_POST[$name . '_key_secret'] ?? '';
+        $incomingSecret  = $_POST[$name . '_key_secret'] ?? '';
         $incomingWebhook = $_POST[$name . '_webhook_secret'] ?? '';
         gateway_save($name, [
             'enabled'        => !empty($_POST[$name . '_enabled']) ? 1 : 0,
@@ -20,18 +26,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-$cf = gateway_get('cashfree') ?: ['enabled' => 0, 'mode' => 'test', 'key_id' => '', 'key_secret' => '', 'webhook_secret' => ''];
-$rp = gateway_get('razorpay') ?: ['enabled' => 0, 'mode' => 'test', 'key_id' => '', 'key_secret' => '', 'webhook_secret' => ''];
+$gateways = [];
+foreach ($GATEWAYS as [$name, ,]) {
+    $gateways[$name] = gateway_get($name) ?: ['enabled' => 0, 'mode' => 'test', 'key_id' => '', 'key_secret' => '', 'webhook_secret' => ''];
+}
 $mask = function ($s) { return $s ? '*****' . substr($s, -4) : ''; };
 include __DIR__ . '/header_admin.php';
 ?>
-<h1 class="page-title">Payment Gateways <small>Configure your Cashfree and Razorpay credentials</small></h1>
+<h1 class="page-title">Payment Gateways <small>Cashfree (PG + Payouts) and Razorpay credentials</small></h1>
 <div class="card">
-  <p class="muted">Enable and configure your gateway credentials. Toggle either or both. When both are enabled, users will be shown a chooser screen.</p>
+  <p class="muted">Enable each gateway you want to use. <strong>Cashfree Payments</strong> handles incoming recharges; <strong>Cashfree Payouts V2</strong> uses a separate API key pair and is used for sending UPI payouts to listeners.</p>
   <?php $f = flash_pop(); if ($f): ?><div class="flash <?= h($f['type']) ?>"><?= h($f['msg']) ?></div><?php endif; ?>
   <form method="post" class="form">
-    <?php foreach ([['cashfree', 'Cashfree'], ['razorpay', 'Razorpay']] as [$n, $L]):
-        $g = $n === 'cashfree' ? $cf : $rp; ?>
+    <?php foreach ($GATEWAYS as [$n, $L, $kLabel, $sLabel]):
+        $g = $gateways[$n]; ?>
       <fieldset class="fs">
         <legend><?= h($L) ?></legend>
         <label class="check">
@@ -44,16 +52,18 @@ include __DIR__ . '/header_admin.php';
             <option value="live" <?= $g['mode'] === 'live' ? 'selected' : '' ?>>Live / Production</option>
           </select>
         </label>
-        <label><span>Key ID / App ID</span>
-          <input type="text" name="<?= $n ?>_key_id" value="<?= h($g['key_id']) ?>" placeholder="<?= $n === 'cashfree' ? 'Cashfree App ID' : 'Razorpay Key ID' ?>" />
+        <label><span><?= h($kLabel) ?></span>
+          <input type="text" name="<?= $n ?>_key_id" value="<?= h($g['key_id']) ?>" placeholder="<?= h($kLabel) ?>" />
         </label>
-        <label><span>Secret Key</span>
-          <input type="text" name="<?= $n ?>_key_secret" value="<?= h($mask($g['key_secret'])) ?>" placeholder="<?= $n === 'cashfree' ? 'Cashfree Secret Key' : 'Razorpay Key Secret' ?>" />
+        <label><span><?= h($sLabel) ?></span>
+          <input type="text" name="<?= $n ?>_key_secret" value="<?= h($mask($g['key_secret'])) ?>" placeholder="<?= h($sLabel) ?>" />
           <small>Leave masked value unchanged to keep current secret.</small>
         </label>
+        <?php if ($n !== 'cashfree_payout'): ?>
         <label><span>Webhook Secret <span class="muted">(optional)</span></span>
           <input type="text" name="<?= $n ?>_webhook_secret" value="<?= h($mask($g['webhook_secret'])) ?>" placeholder="Used to verify direct gateway webhooks" />
         </label>
+        <?php endif; ?>
       </fieldset>
     <?php endforeach; ?>
     <button class="btn primary">Save Gateways</button>
@@ -61,7 +71,8 @@ include __DIR__ . '/header_admin.php';
   <div class="info-box">
     <h3>Where to get keys</h3>
     <ul>
-      <li><strong>Cashfree:</strong> Dashboard → Payment Gateway → Developers → API Keys (2FA required for production keys).</li>
+      <li><strong>Cashfree Payments (PG):</strong> Dashboard → Payment Gateway → Developers → API Keys (2FA required for production keys).</li>
+      <li><strong>Cashfree Payouts V2:</strong> Dashboard → Payouts → Developers → API Keys. <em>Separate</em> from PG keys — different product.</li>
       <li><strong>Razorpay:</strong> Dashboard → Account &amp; Settings → API Keys. Generate separately for Test and Live.</li>
     </ul>
   </div>

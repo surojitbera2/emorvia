@@ -29,4 +29,5 @@ require_once __DIR__ . '/lib/db.php';
 require_once __DIR__ . '/lib/helpers.php';
 require_once __DIR__ . '/lib/node_api.php';
 require_once __DIR__ . '/lib/cashfree.php';
+require_once __DIR__ . '/lib/cashfree_payouts.php';
 require_once __DIR__ . '/lib/razorpay.php';

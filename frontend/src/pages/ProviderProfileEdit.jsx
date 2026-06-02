@@ -20,7 +20,8 @@ export default function ProviderProfileEdit() {
   const nav = useNavigate();
   const fileRef = useRef(null);
   const [me, setMe] = useState(null);
-  const [form, setForm] = useState({ name: "", bio: "", age: 25, avatars: [], languages: [], callPerMinRate: 20, chatPerMinRate: 10 });
+  const [form, setForm] = useState({ name: "", bio: "", age: 25, avatars: [], languages: [], callPerMinRate: 20, chatPerMinRate: 10, upiId: "" });
+  const [limits, setLimits] = useState({ minRate: 20, maxRate: 80 });
   const [allLangs, setAllLangs] = useState([]);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -43,7 +44,13 @@ export default function ProviderProfileEdit() {
           languages: Array.isArray(p.languages) ? p.languages : [],
           callPerMinRate: p.callPerMinRate ?? p.perMinRate ?? 20,
           chatPerMinRate: p.chatPerMinRate ?? Math.max(1, Math.round((p.perMinRate ?? 20) / 2)),
+          upiId: p.upiId || "",
         });
+        // Load global rate limits (admin can change these)
+        try {
+          const b = await api.getPublicBilling();
+          if (b?.minRate && b?.maxRate) setLimits({ minRate: Number(b.minRate), maxRate: Number(b.maxRate) });
+        } catch (_) {}
       } catch { nav("/register"); }
     })();
   }, [nav]);
@@ -72,8 +79,9 @@ export default function ProviderProfileEdit() {
     if (form.avatars.length === 0) return toast.error("Add at least one image");
     const callRate = Math.round(Number(form.callPerMinRate) || 0);
     const chatRate = Math.round(Number(form.chatPerMinRate) || 0);
-    if (callRate < 1) return toast.error("Set a video call rate of at least ₹1/min");
-    if (chatRate < 1) return toast.error("Set a chat rate of at least ₹1/min");
+    const { minRate, maxRate } = limits;
+    if (callRate < minRate || callRate > maxRate) return toast.error(`Video call rate must be ₹${minRate}-₹${maxRate}`);
+    if (chatRate < minRate || chatRate > maxRate) return toast.error(`Chat rate must be ₹${minRate}-₹${maxRate}`);
     setBusy(true);
     try {
       const updated = await api.providerUpdateProfile({
@@ -84,6 +92,7 @@ export default function ProviderProfileEdit() {
         languages: form.languages,
         callPerMinRate: callRate,
         chatPerMinRate: chatRate,
+        upiId: form.upiId.trim(),
       });
       setMe(updated);
       toast.success("Profile saved");
@@ -163,11 +172,11 @@ export default function ProviderProfileEdit() {
               <Input
                 data-testid="pe-call-rate"
                 type="number"
-                min={1}
-                max={1000}
+                min={limits.minRate}
+                max={limits.maxRate}
                 value={form.callPerMinRate}
                 onChange={(e) => setForm({ ...form, callPerMinRate: e.target.value.replace(/\D/g, "").slice(0, 4) })}
-                placeholder="e.g. 20"
+                placeholder={`₹${limits.minRate}-${limits.maxRate}`}
               />
             </div>
             <div>
@@ -175,17 +184,28 @@ export default function ProviderProfileEdit() {
               <Input
                 data-testid="pe-chat-rate"
                 type="number"
-                min={1}
-                max={1000}
+                min={limits.minRate}
+                max={limits.maxRate}
                 value={form.chatPerMinRate}
                 onChange={(e) => setForm({ ...form, chatPerMinRate: e.target.value.replace(/\D/g, "").slice(0, 4) })}
-                placeholder="e.g. 10"
+                placeholder={`₹${limits.minRate}-${limits.maxRate}`}
               />
             </div>
           </div>
           <p className="text-[10px] text-[#6E7694] -mt-3">
-            Set different rates for video calls and chat. Your earnings = rate × admin-set share %.
+            Both rates must be between ₹{limits.minRate} and ₹{limits.maxRate} per minute (set by admin). Earnings = rate × admin share %.
           </p>
+          <div>
+            <Label>UPI ID for payouts</Label>
+            <Input
+              data-testid="pe-upi-id"
+              type="text"
+              value={form.upiId}
+              onChange={(e) => setForm({ ...form, upiId: e.target.value.trim() })}
+              placeholder="yourname@upi"
+            />
+            <p className="text-[10px] text-[#6E7694] mt-1">Admin uses this to send your earnings via Cashfree UPI payouts.</p>
+          </div>
           <div>
             <Label>Mobile</Label>
             <Input value={`+91 ${me.mobile}`} readOnly className="opacity-70" />
