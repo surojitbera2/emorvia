@@ -290,6 +290,15 @@ export default function ChatScreen() {
         {/* Composer */}
         <div className="sticky bottom-0 bg-[#101428] border-t border-white/10 p-3 pb-5">
           <div className="flex items-center gap-2">
+            <button
+              data-testid="chat-end"
+              onClick={() => endChat(false)}
+              disabled={phase === "ended"}
+              className="w-12 h-12 rounded-full bg-[#EF4444]/15 border border-[#EF4444]/40 hover:bg-[#EF4444]/25 flex items-center justify-center transition-all shrink-0"
+              title="End chat"
+            >
+              <Phone className="w-4 h-4 text-[#EF4444] rotate-[135deg]" />
+            </button>
             <input
               data-testid="chat-input"
               type="text"
@@ -304,18 +313,9 @@ export default function ChatScreen() {
               data-testid="chat-send"
               onClick={sendMessage}
               disabled={!draft.trim() || phase !== "connected"}
-              className="w-12 h-12 rounded-full bg-[#6FA8FF] hover:bg-[#5B92F5] disabled:opacity-40 flex items-center justify-center transition-all active:scale-95"
+              className="w-12 h-12 rounded-full bg-[#6FA8FF] hover:bg-[#5B92F5] disabled:opacity-40 flex items-center justify-center transition-all active:scale-95 shrink-0"
             >
               <Send className="w-4 h-4 text-[#101428]" />
-            </button>
-            <button
-              data-testid="chat-end"
-              onClick={() => endChat(false)}
-              disabled={phase === "ended"}
-              className="w-12 h-12 rounded-full bg-[#EF4444]/15 border border-[#EF4444]/40 hover:bg-[#EF4444]/25 flex items-center justify-center transition-all"
-              title="End chat"
-            >
-              <Phone className="w-4 h-4 text-[#EF4444] rotate-[135deg]" />
             </button>
           </div>
         </div>
