@@ -44,6 +44,7 @@ export default function ChatScreen() {
   const ringTimer = useRef(null);
   const typingTimer = useRef(null);
   const scrollRef = useRef(null);
+  const messagesEndRef = useRef(null);
   const secondsRef = useRef(0);
   const maxSecRef = useRef(0);
   const perMinRateRef = useRef(0);
@@ -190,18 +191,9 @@ export default function ChatScreen() {
     setTimeout(() => nav("/app"), 1200);
   };
 
-  // Auto-scroll to bottom (WhatsApp-style) - scroll after render completes
+  // Auto-scroll to bottom (WhatsApp-style) - using scrollIntoView for reliability
   useEffect(() => {
-    if (scrollRef.current) {
-      // Double requestAnimationFrame ensures layout is complete
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-          }
-        });
-      });
-    }
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [messages, peerTyping]);
 
   const sendMessage = () => {
@@ -212,14 +204,6 @@ export default function ChatScreen() {
     signaling.send("chat_message", providerId, { text });
     setDraft("");
     signaling.send("chat_typing", providerId, { typing: false });
-    // Force immediate scroll using requestAnimationFrame for instant feedback
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (scrollRef.current) {
-          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
-      });
-    });
   };
 
   const onDraftChange = (e) => {
@@ -309,6 +293,8 @@ export default function ChatScreen() {
               <p className="text-sm text-[#A9B1CC] mt-1">Total: {inr(currentAmount)} · {formatDuration(seconds)}</p>
             </div>
           )}
+          {/* Invisible scroll anchor */}
+          <div ref={messagesEndRef} />
         </div>
 
         {/* Composer */}

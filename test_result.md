@@ -143,6 +143,21 @@ frontend:
       - working: true
         agent: "main"
         comment: "Improved scroll implementation to be more reliable and consistent. Replaced setTimeout with double requestAnimationFrame for better synchronization with browser paint cycle. This ensures scroll happens exactly after layout is complete. Updated both user and provider sendMessage to use requestAnimationFrame. Added preventDefault on Enter key to prevent any interference. Both sides now have identical, reliable auto-scroll behavior."
+      - working: true
+        agent: "main"
+        comment: "Completely rewrote scroll mechanism using scrollIntoView for maximum reliability. Added invisible anchor div (messagesEndRef) at end of message list. useEffect now calls messagesEndRef.current?.scrollIntoView() which is more reliable than manipulating scrollTop. Removed complex RAF logic in sendMessage - let useEffect handle all scrolling. This approach is simpler, more predictable, and works consistently across all browsers. Also fixed provider chat button layout - moved End button to left side matching user chat layout."
+  
+  - task: "Fix provider chat button layout - End button position"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/ProviderChatScreen.jsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Moved End button from right side to left side in provider chat, matching user chat layout. New order: [End Button] [Input Field] [Send Button]. Added shrink-0 to both buttons. Now both user and provider have consistent button positioning."
 
 backend:
   - task: "Fix 502 error on OTP send - backend dependencies and configuration"

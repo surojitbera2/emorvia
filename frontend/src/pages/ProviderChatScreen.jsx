@@ -35,6 +35,7 @@ export default function ProviderChatScreen() {
   const tickRef = useRef(null);
   const typingTimer = useRef(null);
   const scrollRef = useRef(null);
+  const messagesEndRef = useRef(null);
   const endedRef = useRef(false);
 
   useEffect(() => {
@@ -108,18 +109,9 @@ export default function ProviderChatScreen() {
     setTimeout(() => nav("/provider"), 1200);
   };
 
-  // Auto-scroll to bottom (WhatsApp-style) - scroll after render completes
+  // Auto-scroll to bottom (WhatsApp-style) - using scrollIntoView for reliability
   useEffect(() => {
-    if (scrollRef.current) {
-      // Double requestAnimationFrame ensures layout is complete
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-          }
-        });
-      });
-    }
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [messages, peerTyping]);
 
   const sendMessage = () => {
@@ -130,14 +122,6 @@ export default function ProviderChatScreen() {
     signaling.send("chat_message", userId, { text });
     setDraft("");
     signaling.send("chat_typing", userId, { typing: false });
-    // Force immediate scroll using requestAnimationFrame for instant feedback
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (scrollRef.current) {
-          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
-      });
-    });
   };
 
   const onDraftChange = (e) => {
@@ -205,10 +189,21 @@ export default function ProviderChatScreen() {
               <p className="text-sm text-[#A9B1CC] mt-1">Earned: {inr(myEarning)} · {formatDuration(seconds)}</p>
             </div>
           )}
+          {/* Invisible scroll anchor */}
+          <div ref={messagesEndRef} />
         </div>
 
         <div className="sticky bottom-0 bg-[#101428] border-t border-white/10 p-3 pb-5">
           <div className="flex items-center gap-2">
+            <button
+              data-testid="provider-chat-end"
+              onClick={() => endChat(true)}
+              disabled={phase === "ended"}
+              className="w-12 h-12 rounded-full bg-[#EF4444]/15 border border-[#EF4444]/40 hover:bg-[#EF4444]/25 flex items-center justify-center transition-all shrink-0"
+              title="End chat"
+            >
+              <Phone className="w-4 h-4 text-[#EF4444] rotate-[135deg]" />
+            </button>
             <input
               data-testid="provider-chat-input"
               type="text"
@@ -228,18 +223,9 @@ export default function ProviderChatScreen() {
               data-testid="provider-chat-send"
               onClick={sendMessage}
               disabled={!draft.trim() || phase !== "connected"}
-              className="w-12 h-12 rounded-full bg-[#6FA8FF] hover:bg-[#5B92F5] disabled:opacity-40 flex items-center justify-center transition-all active:scale-95"
+              className="w-12 h-12 rounded-full bg-[#6FA8FF] hover:bg-[#5B92F5] disabled:opacity-40 flex items-center justify-center transition-all active:scale-95 shrink-0"
             >
               <Send className="w-4 h-4 text-[#101428]" />
-            </button>
-            <button
-              data-testid="provider-chat-end"
-              onClick={() => endChat(true)}
-              disabled={phase === "ended"}
-              className="w-12 h-12 rounded-full bg-[#EF4444]/15 border border-[#EF4444]/40 hover:bg-[#EF4444]/25 flex items-center justify-center transition-all"
-              title="End chat"
-            >
-              <Phone className="w-4 h-4 text-[#EF4444] rotate-[135deg]" />
             </button>
           </div>
         </div>
