@@ -60,6 +60,12 @@ export default function ProviderChatScreen() {
             at: new Date(m.at).getTime(),
             historical: true,
           })));
+          // Scroll to bottom after loading history
+          setTimeout(() => {
+            if (scrollRef.current) {
+              scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }
+          }, 100);
         }
         signaling.connect(p.id, "provider");
       } catch (e) { nav("/provider"); return; }
@@ -102,8 +108,20 @@ export default function ProviderChatScreen() {
     setTimeout(() => nav("/provider"), 1200);
   };
 
+  // Auto-scroll to bottom (WhatsApp-style) - scroll after render completes
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (scrollRef.current) {
+      // Use setTimeout to ensure DOM is fully updated before scrolling
+      const timer = setTimeout(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTo({
+            top: scrollRef.current.scrollHeight,
+            behavior: 'smooth'
+          });
+        }
+      }, 0);
+      return () => clearTimeout(timer);
+    }
   }, [messages, peerTyping]);
 
   const sendMessage = () => {
@@ -114,6 +132,12 @@ export default function ProviderChatScreen() {
     signaling.send("chat_message", userId, { text });
     setDraft("");
     signaling.send("chat_typing", userId, { typing: false });
+    // Immediately scroll to bottom when provider sends message (instant feedback)
+    setTimeout(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    }, 50);
   };
 
   const onDraftChange = (e) => {

@@ -40,6 +40,16 @@ html, body {
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+/* Smooth scroll for chat messages (WhatsApp-style) */
+.no-scrollbar {
+    scroll-behavior: smooth;
+}
+
+/* Ensure scroll anchoring for chat */
+[data-testid="chat-messages"] {
+    overflow-anchor: auto;
+}
+
 /* Grain overlay */
 .grain::before {
     content: '';

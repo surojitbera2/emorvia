@@ -78,6 +78,12 @@ export default function ChatScreen() {
             at: new Date(m.at).getTime(),
             historical: true,
           })));
+          // Scroll to bottom after loading history
+          setTimeout(() => {
+            if (scrollRef.current) {
+              scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }
+          }, 100);
         }
 
         signaling.connect(s.id, "user");
@@ -184,9 +190,20 @@ export default function ChatScreen() {
     setTimeout(() => nav("/app"), 1200);
   };
 
-  // Auto-scroll
+  // Auto-scroll to bottom (WhatsApp-style) - scroll after render completes
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (scrollRef.current) {
+      // Use setTimeout to ensure DOM is fully updated before scrolling
+      const timer = setTimeout(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTo({
+            top: scrollRef.current.scrollHeight,
+            behavior: 'smooth'
+          });
+        }
+      }, 0);
+      return () => clearTimeout(timer);
+    }
   }, [messages, peerTyping]);
 
   const sendMessage = () => {
@@ -197,6 +214,12 @@ export default function ChatScreen() {
     signaling.send("chat_message", providerId, { text });
     setDraft("");
     signaling.send("chat_typing", providerId, { typing: false });
+    // Immediately scroll to bottom when user sends message (instant feedback)
+    setTimeout(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    }, 50);
   };
 
   const onDraftChange = (e) => {

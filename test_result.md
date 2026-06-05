@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "In text chat box, chat end button position not perfect. User accidentally press end button instead of send button after typing text. Also reported 502 error when trying to send OTP. Chat incoming in provider screen shows mobile number, want username instead of mobile."
+user_problem_statement: "In text chat box, chat end button position not perfect. User accidentally press end button instead of send button after typing text. Also reported 502 error when trying to send OTP. Chat incoming in provider screen shows mobile number, want username instead of mobile. In chat box want like WhatsApp - new message always show first just like WhatsApp, means scroll or new message jump issue, currently need to scroll for check new message."
 
 frontend:
   - task: "Fix chat composer button layout - reposition End button"
@@ -128,6 +128,18 @@ frontend:
       - working: true
         agent: "main"
         comment: "Changed chat_request to send user's name instead of mobile number. If user has no name, generates username like 'User1234' from last 4 digits of mobile. Updated ProviderHome to pass userName via navigation state to both chat and call screens. Updated ProviderChatScreen and ProviderCallScreen to receive and display the userName from navigation state. Providers now see friendly usernames instead of mobile numbers."
+
+  - task: "Fix chat scroll behavior - WhatsApp-style auto-scroll for new messages"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/ChatScreen.jsx, /app/frontend/src/pages/ProviderChatScreen.jsx, /app/frontend/src/index.css"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Implemented WhatsApp-style auto-scroll where new messages automatically appear at bottom without manual scrolling. Changes: 1) Added smooth scroll behavior with setTimeout to ensure DOM renders before scrolling 2) Instant scroll when loading historical messages 3) Immediate scroll when sending message for instant feedback 4) Added CSS smooth scroll-behavior and overflow-anchor for better UX 5) Applied to both user ChatScreen and ProviderChatScreen. New messages now jump to view automatically like WhatsApp."
 
 backend:
   - task: "Fix 502 error on OTP send - backend dependencies and configuration"
@@ -162,3 +174,5 @@ agent_communication:
     message: "Fixed 502 error on OTP send. Root cause: Node backend dependencies were not installed and .env configuration file was missing. Installed all npm packages and created .env with MongoDB URL, JWT secret, MessageCentral OTP credentials (from PRD), and other required settings. Backend now running successfully on port 8001, MongoDB connected, and OTP endpoint responding correctly."
   - agent: "main"
     message: "Changed provider incoming screen to show username instead of mobile number. Updated ChatScreen to send user's name (or generated username like 'User1234' if no name exists) in chat_request. Modified ProviderHome to pass userName to both chat and call screens via navigation state. Updated ProviderChatScreen and ProviderCallScreen to display the received userName. Providers now see friendly identifiable names instead of phone numbers."
+  - agent: "main"
+    message: "Fixed chat scroll behavior to work like WhatsApp. New messages now automatically appear at the bottom without requiring manual scrolling. Implemented: 1) Smooth auto-scroll with proper timing to wait for DOM render 2) Instant scroll on initial message history load 3) Immediate scroll when user/provider sends message for instant visual feedback 4) Added CSS scroll-behavior: smooth and overflow-anchor for better UX 5) Applied to both user and provider chat screens. Chat now behaves exactly like WhatsApp - latest messages always visible."
