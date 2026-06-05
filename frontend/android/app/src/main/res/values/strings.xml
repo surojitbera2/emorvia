@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Emorvia</string>
+    <string name="title_activity_main">Emorvia</string>
+    <string name="package_name">com.emorvia.app</string>
+    <string name="custom_url_scheme">com.emorvia.app</string>
+</resources>
