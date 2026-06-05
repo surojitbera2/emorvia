@@ -140,6 +140,9 @@ frontend:
       - working: true
         agent: "main"
         comment: "Implemented WhatsApp-style auto-scroll where new messages automatically appear at bottom without manual scrolling. Changes: 1) Added smooth scroll behavior with setTimeout to ensure DOM renders before scrolling 2) Instant scroll when loading historical messages 3) Immediate scroll when sending message for instant feedback 4) Added CSS smooth scroll-behavior and overflow-anchor for better UX 5) Applied to both user ChatScreen and ProviderChatScreen. New messages now jump to view automatically like WhatsApp."
+      - working: true
+        agent: "main"
+        comment: "Improved scroll implementation to be more reliable and consistent. Replaced setTimeout with double requestAnimationFrame for better synchronization with browser paint cycle. This ensures scroll happens exactly after layout is complete. Updated both user and provider sendMessage to use requestAnimationFrame. Added preventDefault on Enter key to prevent any interference. Both sides now have identical, reliable auto-scroll behavior."
 
 backend:
   - task: "Fix 502 error on OTP send - backend dependencies and configuration"

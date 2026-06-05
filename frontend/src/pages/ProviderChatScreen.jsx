@@ -111,16 +111,14 @@ export default function ProviderChatScreen() {
   // Auto-scroll to bottom (WhatsApp-style) - scroll after render completes
   useEffect(() => {
     if (scrollRef.current) {
-      // Use setTimeout to ensure DOM is fully updated before scrolling
-      const timer = setTimeout(() => {
-        if (scrollRef.current) {
-          scrollRef.current.scrollTo({
-            top: scrollRef.current.scrollHeight,
-            behavior: 'smooth'
-          });
-        }
-      }, 0);
-      return () => clearTimeout(timer);
+      // Double requestAnimationFrame ensures layout is complete
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+          }
+        });
+      });
     }
   }, [messages, peerTyping]);
 
@@ -132,12 +130,14 @@ export default function ProviderChatScreen() {
     signaling.send("chat_message", userId, { text });
     setDraft("");
     signaling.send("chat_typing", userId, { typing: false });
-    // Immediately scroll to bottom when provider sends message (instant feedback)
-    setTimeout(() => {
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }
-    }, 50);
+    // Force immediate scroll using requestAnimationFrame for instant feedback
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      });
+    });
   };
 
   const onDraftChange = (e) => {
@@ -214,7 +214,12 @@ export default function ProviderChatScreen() {
               type="text"
               value={draft}
               onChange={onDraftChange}
-              onKeyDown={(e) => { if (e.key === "Enter") sendMessage(); }}
+              onKeyDown={(e) => { 
+                if (e.key === "Enter" && !e.shiftKey) { 
+                  e.preventDefault(); 
+                  sendMessage(); 
+                }
+              }}
               placeholder={phase === "connected" ? "Type a message…" : "Chat ended"}
               disabled={phase !== "connected"}
               className="flex-1 bg-[#171C33] border border-white/10 rounded-2xl px-4 py-3 text-sm text-[#F2F5FF] placeholder:text-[#6E7694] focus:outline-none focus:border-[#6FA8FF] disabled:opacity-50"
