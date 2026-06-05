@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "In text chat box, chat end button position not perfect. User accidentally press end button instead of send button after typing text."
+user_problem_statement: "In text chat box, chat end button position not perfect. User accidentally press end button instead of send button after typing text. Also reported 502 error when trying to send OTP."
 
 frontend:
   - task: "Fix chat composer button layout - reposition End button"
@@ -116,6 +116,19 @@ frontend:
       - working: true
         agent: "main"
         comment: "Repositioned End button from right side (after Send) to left side (before input field). New layout: [End Button] [Input Field] [Send Button]. This maximizes the distance between Send and End buttons, preventing accidental taps. Added shrink-0 class to both buttons for consistent sizing."
+
+backend:
+  - task: "Fix 502 error on OTP send - backend dependencies and configuration"
+    implemented: true
+    working: true
+    file: "/app/node-backend/.env, /app/node-backend/package.json"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Fixed 502 error caused by missing Node backend dependencies and configuration. Installed all npm packages (dotenv, mongoose, express, socket.io, etc.). Created .env file with MongoDB connection string, JWT secret, MessageCentral OTP credentials, and other required config. Backend now successfully connects to MongoDB and listens on port 8001. OTP endpoint tested and working correctly."
 
 metadata:
   created_by: "main_agent"
@@ -132,4 +145,6 @@ test_plan:
 
 agent_communication:
   - agent: "main"
-    message: "Fixed the chat composer button positioning issue. The End button has been moved to the left side of the input field, with the Send button remaining on the right. This prevents users from accidentally tapping End when trying to tap Send. Services restarted successfully."
+    message: "Fixed the chat composer button positioning issue. The End button has been moved to the left side of the input field, with the Send button remaining on the right. This prevents users from accidentally tapping End when trying to tap Send."
+  - agent: "main"
+    message: "Fixed 502 error on OTP send. Root cause: Node backend dependencies were not installed and .env configuration file was missing. Installed all npm packages and created .env with MongoDB URL, JWT secret, MessageCentral OTP credentials (from PRD), and other required settings. Backend now running successfully on port 8001, MongoDB connected, and OTP endpoint responding correctly."
