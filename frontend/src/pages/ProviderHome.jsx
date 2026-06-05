@@ -144,14 +144,15 @@ export default function ProviderHome() {
     if (!incoming) return;
     ringtone.stop();
     const userId = incoming.from;
+    const userName = incoming.fromName || "User";
     if (incoming.kind === "chat") {
       signaling.send("chat_accept", userId);
       setIncoming(null);
-      nav(`/provider/chat/${userId}`);
+      nav(`/provider/chat/${userId}`, { state: { userName } });
     } else {
       signaling.send("call_accept", userId);
       setIncoming(null);
-      nav(`/provider/call/${userId}`);
+      nav(`/provider/call/${userId}`, { state: { userName } });
     }
   };
   const reject = () => {

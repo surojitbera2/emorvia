@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "In text chat box, chat end button position not perfect. User accidentally press end button instead of send button after typing text. Also reported 502 error when trying to send OTP."
+user_problem_statement: "In text chat box, chat end button position not perfect. User accidentally press end button instead of send button after typing text. Also reported 502 error when trying to send OTP. Chat incoming in provider screen shows mobile number, want username instead of mobile."
 
 frontend:
   - task: "Fix chat composer button layout - reposition End button"
@@ -116,6 +116,18 @@ frontend:
       - working: true
         agent: "main"
         comment: "Repositioned End button from right side (after Send) to left side (before input field). New layout: [End Button] [Input Field] [Send Button]. This maximizes the distance between Send and End buttons, preventing accidental taps. Added shrink-0 class to both buttons for consistent sizing."
+
+  - task: "Show username instead of mobile number in provider incoming chat/call screen"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/ChatScreen.jsx, /app/frontend/src/pages/ProviderHome.jsx, /app/frontend/src/pages/ProviderChatScreen.jsx, /app/frontend/src/pages/ProviderCallScreen.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Changed chat_request to send user's name instead of mobile number. If user has no name, generates username like 'User1234' from last 4 digits of mobile. Updated ProviderHome to pass userName via navigation state to both chat and call screens. Updated ProviderChatScreen and ProviderCallScreen to receive and display the userName from navigation state. Providers now see friendly usernames instead of mobile numbers."
 
 backend:
   - task: "Fix 502 error on OTP send - backend dependencies and configuration"
@@ -148,3 +160,5 @@ agent_communication:
     message: "Fixed the chat composer button positioning issue. The End button has been moved to the left side of the input field, with the Send button remaining on the right. This prevents users from accidentally tapping End when trying to tap Send."
   - agent: "main"
     message: "Fixed 502 error on OTP send. Root cause: Node backend dependencies were not installed and .env configuration file was missing. Installed all npm packages and created .env with MongoDB URL, JWT secret, MessageCentral OTP credentials (from PRD), and other required settings. Backend now running successfully on port 8001, MongoDB connected, and OTP endpoint responding correctly."
+  - agent: "main"
+    message: "Changed provider incoming screen to show username instead of mobile number. Updated ChatScreen to send user's name (or generated username like 'User1234' if no name exists) in chat_request. Modified ProviderHome to pass userName to both chat and call screens via navigation state. Updated ProviderChatScreen and ProviderCallScreen to display the received userName. Providers now see friendly identifiable names instead of phone numbers."

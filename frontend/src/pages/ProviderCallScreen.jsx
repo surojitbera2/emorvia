@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { PhoneOff, Mic, MicOff, Video as VideoIcon, VideoOff } from "lucide-react";
 import { MobileShell } from "../components/MobileShell";
 import { api } from "../lib/store";
@@ -18,6 +18,9 @@ const computeAmount = (durationSec, perMinRate) => {
 export default function ProviderCallScreen() {
   const nav = useNavigate();
   const { userId } = useParams();
+  const location = useLocation();
+  const userName = location.state?.userName || "User";
+  
   const [me, setMe] = useState(null);
   const [caller, setCaller] = useState(null);
   const [seconds, setSeconds] = useState(0);
@@ -55,7 +58,7 @@ export default function ProviderCallScreen() {
         const override = provider?.sharePctOverride;
         setSharePct(override != null && !isNaN(Number(override)) ? Number(override) : globalPct);
         setPerMinRate(Math.max(0, Number(provider?.perMinRate) || 0));
-        setCaller({ id: userId, name: "User" });
+        setCaller({ id: userId, name: userName });
         meRef.current = provider; userIdRef.current = userId;
         signaling.connect(provider.id, "provider");
       } catch { nav("/register"); }

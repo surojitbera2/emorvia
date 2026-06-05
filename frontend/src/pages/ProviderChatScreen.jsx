@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { ChevronLeft, Send, Phone, Loader2 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { api } from "../lib/store";
@@ -20,6 +20,8 @@ const computeAmount = (sec, rate) => {
 export default function ProviderChatScreen() {
   const nav = useNavigate();
   const { userId } = useParams();
+  const location = useLocation();
+  const userName = location.state?.userName || "User";
 
   const [me, setMe] = useState(null);
   const [perMinRate, setPerMinRate] = useState(0);
@@ -139,10 +141,10 @@ export default function ProviderChatScreen() {
                 <ChevronLeft className="w-5 h-5 text-[#F2F5FF]" />
               </button>
               <div className="w-10 h-10 rounded-full bg-[#6FA8FF]/15 border border-[#6FA8FF]/30 flex items-center justify-center text-[#6FA8FF] font-bold">
-                U
+                {userName.charAt(0).toUpperCase()}
               </div>
               <div className="leading-tight">
-                <p className="font-heading text-sm font-semibold text-[#F2F5FF]">User</p>
+                <p className="font-heading text-sm font-semibold text-[#F2F5FF]">{userName}</p>
                 {phase === "connected" ? (
                   <p className="text-[10px] text-[#3DDC97] flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#3DDC97] dot-pulse" />

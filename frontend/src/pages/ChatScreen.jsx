@@ -81,8 +81,9 @@ export default function ChatScreen() {
         }
 
         signaling.connect(s.id, "user");
-        // Send chat request to provider
-        signaling.send("chat_request", providerId, { fromName: u.mobile || "User" });
+        // Send chat request to provider - use name if available, otherwise generate username from mobile
+        const displayName = u.name || `User${u.mobile?.slice(-4) || ""}`;
+        signaling.send("chat_request", providerId, { fromName: displayName });
 
         // 60s ringing timeout
         ringTimer.current = setTimeout(() => {
