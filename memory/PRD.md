@@ -5,6 +5,7 @@
 - **Iter 2** — Single-CTA Welcome, password UI removed, persistent session, Chat feature with same billing model as video
 - **Iter 3** — Separate `callPerMinRate` + `chatPerMinRate` per provider, support phone banner removed from user dashboard
 - **Iter 4** — OTP send cooldown (60s), idempotent welcome bonus, chat message persistence + history page, dedicated provider register & login pages, legacy `perMinRate` deprecated
+- **Iter 5 (Android)** — Capacitor 7 Android app built. Debug APK signed and available at `/app/emorvia-app.apk` (7.2 MB). Package: `com.emorvia.app`, backend pinned to `https://dash.emorvia.in` via `.env.production`. Release keystore at `/app/releases/emorvia-release.keystore` (alias `emorvia`, password `emorvia2025`).
 
 ## Architecture
 - **Node-backend** (Express + Socket.io + Mongoose) on port 8001 via Python `execvp` shim

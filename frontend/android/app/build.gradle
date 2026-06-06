@@ -16,10 +16,19 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv("EMORVIA_KEYSTORE") ?: "../../../releases/emorvia-release.keystore")
+            storePassword System.getenv("EMORVIA_KEYSTORE_PASSWORD") ?: "emorvia2025"
+            keyAlias System.getenv("EMORVIA_KEY_ALIAS") ?: "emorvia"
+            keyPassword System.getenv("EMORVIA_KEY_PASSWORD") ?: "emorvia2025"
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
     }
 }
