@@ -19,7 +19,7 @@
   | `JWT_SECRET` | a long random string |
   | `ADMIN_USERNAME` | `admindash` |
   | `ADMIN_PASSWORD` | `Admin#2026*` |
-  | `CORS_ORIGIN` | `https://fitness-33.preview.emergentagent.com` |
+  | `CORS_ORIGIN` | `https://private-call-handler.preview.emergentagent.com` |
 - Deploy. Note the public URL, e.g. `https://dialpro-backend.onrender.com`.
 
 ### 3. Verify
