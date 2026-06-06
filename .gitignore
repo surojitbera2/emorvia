@@ -86,3 +86,6 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Allow exceptions for non-secret env files needed for APK build:
+!frontend/.env.production
