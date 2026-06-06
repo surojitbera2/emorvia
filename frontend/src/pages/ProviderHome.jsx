@@ -10,6 +10,7 @@ import { signaling } from "../lib/signaling";
 import { ringtone } from "../lib/ringtone";
 import { notify } from "../lib/notify";
 import { webPush } from "../lib/webPush";
+import { initFcm, disableFcm } from "../lib/fcmManager";
 import { toast, Toaster } from "sonner";
 
 export default function ProviderHome() {
@@ -118,6 +119,43 @@ export default function ProviderHome() {
     }
   }, [me]);
 
+  // Initialise FCM (native Android only). Sends device token to backend so server
+  // can target this device with incoming-call / chat push notifications.
+  useEffect(() => {
+    if (!me) return;
+    initFcm({ verbose: false }).catch(() => {});
+  }, [me]);
+
+  // Native deep-link handlers: when the user taps Accept on a full-screen FCM
+  // call notification, MainActivity dispatches `emorviaAcceptCall` here.
+  useEffect(() => {
+    if (!me) return;
+    const onAccept = (ev) => {
+      const d = ev.detail || {};
+      const userId = d.callerId;
+      if (!userId) return;
+      const userName = d.callerName || "User";
+      ringtone.stop();
+      signaling.send("call_accept", userId);
+      setIncoming(null);
+      nav(`/provider/call/${userId}`, { state: { userName } });
+    };
+    const onOpenChat = (ev) => {
+      const d = ev.detail || {};
+      const userId = d.callerId;
+      if (!userId) return;
+      const userName = d.callerName || "User";
+      ringtone.stop();
+      nav(`/provider/chat/${userId}`, { state: { userName } });
+    };
+    window.addEventListener("emorviaAcceptCall", onAccept);
+    window.addEventListener("emorviaOpenChat", onOpenChat);
+    return () => {
+      window.removeEventListener("emorviaAcceptCall", onAccept);
+      window.removeEventListener("emorviaOpenChat", onOpenChat);
+    };
+  }, [me, nav]);
+
   if (!me) return null;
 
   const toggleOnline = async () => {
@@ -174,7 +212,7 @@ export default function ProviderHome() {
       <GlassHeader title="Provider" right={
         <div className="flex items-center gap-1">
           <button data-testid="provider-chats" onClick={() => nav("/provider/chats")} className="p-2 rounded-lg hover:bg-white/5" title="My chats"><MessageCircle className="w-4 h-4 text-[#3DDC97]" /></button>
-          <button data-testid="provider-logout" onClick={() => { clearSession(); nav("/"); }} className="p-2 rounded-lg hover:bg-white/5"><LogOut className="w-4 h-4" /></button>
+          <button data-testid="provider-logout" onClick={() => { disableFcm().catch(()=>{}); clearSession(); nav("/"); }} className="p-2 rounded-lg hover:bg-white/5"><LogOut className="w-4 h-4" /></button>
         </div>
       } />
       <div className="px-5 pt-6 pb-32 space-y-5">

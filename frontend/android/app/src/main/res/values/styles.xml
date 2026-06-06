@@ -19,4 +19,12 @@
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
     </style>
+
+    <!-- Full-screen incoming-call activity theme \u2014 dark, no title bar. -->
+    <style name="AppTheme.IncomingCall" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@color/colorPrimaryDark</item>
+        <item name="android:windowShowWallpaper">false</item>
+    </style>
 </resources>

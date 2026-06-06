@@ -71,6 +71,31 @@ if (!VAPID || !VAPID.publicKey || !VAPID.privateKey) {
 }
 webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:admin@emorvia.in", VAPID.publicKey, VAPID.privateKey);
 
+// ----- Firebase Admin SDK for FCM (Android push notifications) -----
+// Service account JSON path can be overridden via FIREBASE_SERVICE_ACCOUNT env var.
+// Default: /app/node-backend/firebase-service-account.json
+// If the file is missing or invalid, FCM is silently disabled (web push still works).
+const firebaseAdmin = require("firebase-admin");
+const FIREBASE_SA_PATH = process.env.FIREBASE_SERVICE_ACCOUNT || path.join(__dirname, "firebase-service-account.json");
+let FCM_READY = false;
+try {
+  if (fs.existsSync(FIREBASE_SA_PATH)) {
+    const raw = fs.readFileSync(FIREBASE_SA_PATH, "utf8");
+    const sa = JSON.parse(raw);
+    if (sa && sa.project_id && sa.private_key && sa.client_email) {
+      firebaseAdmin.initializeApp({ credential: firebaseAdmin.credential.cert(sa) });
+      FCM_READY = true;
+      console.log(`Firebase Admin SDK initialised for project: ${sa.project_id}`);
+    } else {
+      console.warn("Firebase service-account JSON missing project_id/private_key/client_email — FCM disabled.");
+    }
+  } else {
+    console.warn(`Firebase service-account JSON not found at ${FIREBASE_SA_PATH} — FCM disabled (push via web-push only).`);
+  }
+} catch (e) {
+  console.warn("Firebase Admin SDK init failed:", e.message, "— FCM disabled.");
+}
+
 const app = express();
 app.set("trust proxy", true);  // Honour X-Forwarded-Proto from Nginx
 app.use(cors({ origin: (process.env.CORS_ORIGIN || "*").split(","), credentials: true }));
@@ -204,6 +229,17 @@ const PushSubSchema = new mongoose.Schema({
   at: { type: Date, default: Date.now },
 }, { toJSON: { transform }, toObject: { transform } });
 
+// FCM (Firebase Cloud Messaging) tokens — for native Android push.
+// Multiple devices per provider supported. Token is unique per device.
+const FcmTokenSchema = new mongoose.Schema({
+  ownerId: { type: String, index: true },
+  ownerRole: { type: String, enum: ["user", "provider"], default: "provider" },
+  token: { type: String, unique: true, index: true },
+  platform: { type: String, enum: ["android", "ios", "web"], default: "android" },
+  ua: String,
+  at: { type: Date, default: Date.now },
+}, { toJSON: { transform }, toObject: { transform } });
+
 // Provider payouts — admin records each payout cycle; provider's pending balance resets to 0.
 const PayoutSchema = new mongoose.Schema({
   providerId: { type: String, index: true },
@@ -237,6 +273,7 @@ const Recharge = mongoose.model("Recharge", RechargeSchema);
 const Settings = mongoose.model("Settings", SettingsSchema);
 const Otp = mongoose.model("Otp", OtpSchema);
 const PushSub = mongoose.model("PushSub", PushSubSchema);
+const FcmToken = mongoose.model("FcmToken", FcmTokenSchema);
 const Payout = mongoose.model("Payout", PayoutSchema);
 const ChatMessage = mongoose.model("ChatMessage", ChatMessageSchema);
 
@@ -891,6 +928,7 @@ app.delete("/api/provider/me", auth("provider"), async (req, res) => {
       CallLog.deleteMany({ providerId }),
       Payout.deleteMany({ providerId }),
       PushSub.deleteMany({ ownerId: providerId, ownerRole: "provider" }),
+      FcmToken.deleteMany({ ownerId: providerId, ownerRole: "provider" }),
     ]);
     providerBlocks.delete(providerId);
     res.json({ ok: true });
@@ -1112,6 +1150,89 @@ const pushToOwner = async (ownerId, payload) => {
       }
     }
   }));
+};
+
+// ===== FCM (native Android) =====
+// Register a device FCM token (called by Capacitor app once permission granted).
+app.post("/api/push/fcm/register", auth("provider"), async (req, res) => {
+  try {
+    const token = String(req.body?.token || "").trim();
+    const platform = String(req.body?.platform || "android").toLowerCase();
+    if (!token) return res.status(400).json({ error: "token required" });
+    await FcmToken.findOneAndUpdate(
+      { token },
+      { ownerId: req.user.id, ownerRole: "provider", token, platform, ua: req.body?.userAgent || "" },
+      { upsert: true, new: true }
+    );
+    res.json({ ok: true, fcmReady: FCM_READY });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/push/fcm/unregister", auth("provider"), async (req, res) => {
+  const token = String(req.body?.token || "").trim();
+  if (token) await FcmToken.deleteOne({ token });
+  res.json({ ok: true });
+});
+
+// Test FCM — provider triggers a test incoming-call push to all their devices.
+app.post("/api/push/fcm/test", auth("provider"), async (req, res) => {
+  if (!FCM_READY) return res.status(503).json({ error: "FCM not configured on server" });
+  const result = await sendFcmToOwner(req.user.id, {
+    type: "incoming_call",
+    title: "Test incoming call",
+    body: "This is a test call notification",
+    callerId: "test-caller",
+    callerName: "Test User",
+    callType: "video",
+  });
+  res.json({ ok: true, ...result });
+});
+
+// Send FCM data-only message to all devices of an owner.
+// Android side will parse `type` and either show full-screen call UI or chat notification.
+// Returns { delivered, failed }. Auto-deletes invalid/expired tokens.
+const sendFcmToOwner = async (ownerId, data) => {
+  if (!FCM_READY) return { delivered: 0, failed: 0, skipped: true };
+  const docs = await FcmToken.find({ ownerId }).lean();
+  if (!docs.length) return { delivered: 0, failed: 0 };
+  // Cast all values to string — FCM requires data fields to be strings.
+  const dataPayload = {};
+  Object.keys(data || {}).forEach((k) => {
+    const v = data[k];
+    if (v === undefined || v === null) return;
+    dataPayload[k] = typeof v === "string" ? v : String(v);
+  });
+  let delivered = 0, failed = 0;
+  const staleTokens = [];
+  await Promise.all(docs.map(async (d) => {
+    try {
+      await firebaseAdmin.messaging().send({
+        token: d.token,
+        // Data-only message → MyFirebaseMessagingService.onMessageReceived fires
+        // even when app is in background / killed state (high priority).
+        data: dataPayload,
+        android: {
+          priority: "high",
+          ttl: 60 * 1000,  // 60s — calls/chat are time-sensitive
+        },
+      });
+      delivered++;
+    } catch (e) {
+      failed++;
+      const code = e?.errorInfo?.code || e?.code || "";
+      if (code === "messaging/registration-token-not-registered" ||
+          code === "messaging/invalid-registration-token" ||
+          code === "messaging/invalid-argument") {
+        staleTokens.push(d.token);
+      } else {
+        console.error("FCM send error:", code, e?.message);
+      }
+    }
+  }));
+  if (staleTokens.length) {
+    await FcmToken.deleteMany({ token: { $in: staleTokens } });
+  }
+  return { delivered, failed };
 };
 
 // Admin — recharges / calls / payments
@@ -1953,6 +2074,17 @@ io.on("connection", (socket) => {
       callerName: msg.fromName || "User",
       tag: `call-${from}`,
     }).catch(() => {});
+
+    // FCM (native Android) — fires WhatsApp-style full-screen call UI with default ringtone.
+    sendFcmToOwner(to, {
+      type: "incoming_call",
+      title: "Incoming call",
+      body: `${msg.fromName || "Someone"} is calling you`,
+      callerId: from,
+      callerName: msg.fromName || "User",
+      callType: msg.callType || "video",
+      ts: Date.now(),
+    }).catch(() => {});
   });
 
   // CALL ACCEPT
@@ -2310,6 +2442,16 @@ io.on("connection", (socket) => {
       callerName: msg.fromName || "User",
       tag: `chat-${from}`,
     }).catch(() => {});
+
+    // FCM — show high-priority chat notification on provider's Android device.
+    sendFcmToOwner(to, {
+      type: "incoming_chat",
+      title: "New chat request",
+      body: `${msg.fromName || "Someone"} wants to chat with you`,
+      callerId: from,
+      callerName: msg.fromName || "User",
+      ts: Date.now(),
+    }).catch(() => {});
   });
 
   // CHAT ACCEPT  (provider → server → user)
@@ -2430,6 +2572,19 @@ io.on("connection", (socket) => {
         at,
       });
     } catch (e) { console.error("chat_message persist:", e.message); }
+
+    // FCM — only notify provider (recipient is provider when sender is user).
+    // Skip if provider's socket is currently online to avoid duplicate alerts.
+    if (senderRole === "user" && !sockets.get(to)) {
+      sendFcmToOwner(to, {
+        type: "chat_message",
+        title: msg.fromName || "New message",
+        body: text.length > 80 ? text.slice(0, 80) + "..." : text,
+        callerId: from,
+        callerName: msg.fromName || "User",
+        ts: at.getTime(),
+      }).catch(() => {});
+    }
   });
 
   // TYPING indicator

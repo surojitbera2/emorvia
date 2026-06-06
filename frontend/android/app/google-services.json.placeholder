@@ -1,0 +1,20 @@
+{
+  "_comment": "PLACEHOLDER — replace this file with the real google-services.json downloaded from Firebase Console. See /app/FIREBASE_SETUP.md for the exact steps. While this placeholder is present the google-services Gradle plugin will FAIL the build, so DO NOT commit this placeholder to a release build — only present so other devs see the expected location.",
+  "project_info": {
+    "project_number": "000000000000",
+    "project_id": "emorvia-placeholder",
+    "storage_bucket": "emorvia-placeholder.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+        "android_client_info": { "package_name": "com.emorvia.app" }
+      },
+      "oauth_client": [],
+      "api_key": [ { "current_key": "PLACEHOLDER_REPLACE_ME" } ],
+      "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+    }
+  ],
+  "configuration_version": "1"
+}

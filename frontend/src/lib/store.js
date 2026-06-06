@@ -41,6 +41,12 @@ export const api = {
   pushUnsubscribe: (endpoint) => unwrap(http.post("/api/push/unsubscribe", { endpoint })),
   pushTest: () => unwrap(http.post("/api/push/test")),
 
+  // ----- FCM (native Android push) -----
+  fcmRegister: (token, platform = "android") =>
+    unwrap(http.post("/api/push/fcm/register", { token, platform, userAgent: navigator.userAgent })),
+  fcmUnregister: (token) => unwrap(http.post("/api/push/fcm/unregister", { token })),
+  fcmTest: () => unwrap(http.post("/api/push/fcm/test")),
+
   // ----- provider self -----
   providerUpdateProfile: (patch) => unwrap(http.patch("/api/provider/me", patch)),
   providerUploadImages: async (files) => {
