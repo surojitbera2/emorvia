@@ -171,6 +171,15 @@ export default function ProviderHome() {
       if (!userId) return;
       const userName = d.callerName || "User";
       ringtone.stop();
+      // When tap comes from an "incoming_chat" notification, the user is
+      // still waiting for accept/reject — show the in-app dialog instead of
+      // jumping into the chat screen (which would otherwise look like an
+      // auto-accept). For "chat_message" tap (already in conversation), open
+      // the chat directly.
+      if (d.chatType === "incoming_chat") {
+        setIncoming({ from: userId, fromName: userName, kind: "chat" });
+        return;
+      }
       nav(`/provider/chat/${userId}`, { state: { userName } });
     };
     window.addEventListener("emorviaAcceptCall", onAccept);

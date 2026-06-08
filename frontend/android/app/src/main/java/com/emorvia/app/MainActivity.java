@@ -42,11 +42,13 @@ public class MainActivity extends BridgeActivity {
                 String callerId   = String.valueOf(intent.getStringExtra("callerId"));
                 String callerName = String.valueOf(intent.getStringExtra("callerName"));
                 String callType   = String.valueOf(intent.getStringExtra("callType"));
+                String chatType   = String.valueOf(intent.getStringExtra("chatType"));
                 String event = acceptCall ? "emorviaAcceptCall" : "emorviaOpenChat";
                 String js = "window.dispatchEvent(new CustomEvent('" + event + "', { detail: {"
                         + "callerId: " + jsonStr(callerId) + ","
                         + "callerName: " + jsonStr(callerName) + ","
-                        + "callType: " + jsonStr(callType)
+                        + "callType: " + jsonStr(callType) + ","
+                        + "chatType: " + jsonStr(chatType)
                         + "} }));";
                 getBridge().getWebView().evaluateJavascript(js, null);
             } catch (Exception ignored) {}

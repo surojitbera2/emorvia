@@ -2095,17 +2095,29 @@ io.on("connection", (socket) => {
       return;
     }
 
+    // Dedupe / suppress notifications based on prior session state:
+    //   - "ringing": already pushed once → drop silently (caller retry)
+    //   - "rejected": callee already said no → re-notify caller, don't re-ring
+    //   - "cancelled": caller already hung up → ignore stray retries
+    const existing = getRinging(from, to);
+    if (existing) {
+      if (existing.status === "ringing") {
+        // Still relay the socket request (helps the callee's UI re-sync if it
+        // missed the first one), but skip FCM/webpush — they were already sent.
+        deliver("call_request", to, { ...msg, from });
+        return;
+      }
+      if (existing.status === "rejected") {
+        deliver("call_reject", from, { from: to, reason: "rejected" });
+        return;
+      }
+      if (existing.status === "cancelled" || existing.status === "accepted") return;
+    }
+
     deliver("call_request", to, {
       ...msg,
       from,
     });
-
-    // Dedupe heavy notifications (FCM full-screen UI + webpush) so the
-    // caller's 2.5s retry interval doesn't re-fire IncomingCallActivity.
-    const existing = getRinging(from, to);
-    if (existing && existing.status === "ringing") {
-      return; // already pushed once; socket relay above is enough
-    }
     startRinging(from, to, "call");
 
     // PUSH NOTIFICATION — always fire so WebView/minimized apps receive
@@ -2489,12 +2501,20 @@ io.on("connection", (socket) => {
       return;
     }
 
-    deliver("chat_request", to, { ...msg, from });
-
     const existing = getRinging(from, to);
-    if (existing && existing.status === "ringing") {
-      return;
+    if (existing) {
+      if (existing.status === "ringing") {
+        deliver("chat_request", to, { ...msg, from });
+        return;
+      }
+      if (existing.status === "rejected") {
+        deliver("chat_reject", from, { from: to, reason: "rejected" });
+        return;
+      }
+      if (existing.status === "cancelled" || existing.status === "accepted") return;
     }
+
+    deliver("chat_request", to, { ...msg, from });
     startRinging(from, to, "chat");
 
     pushToOwner(to, {

@@ -162,6 +162,9 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         String title = orDefault(data.get("title"), "New message");
         String body  = orDefault(data.get("body"),  "You have a new message");
         String callerId = orDefault(data.get("callerId"), "");
+        String callerName = orDefault(data.get("callerName"), "");
+        // "incoming_chat" = new chat request (needs Accept/Reject), "chat_message" = in-conversation
+        String chatType = orDefault(data.get("type"), "chat_message");
 
         // Tap → open MainActivity, React layer routes to chat.
         Intent tapIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());
@@ -169,6 +172,8 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         tapIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         tapIntent.putExtra("openChat", true);
         tapIntent.putExtra("callerId", callerId);
+        tapIntent.putExtra("callerName", callerName);
+        tapIntent.putExtra("chatType", chatType);
 
         int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
