@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronLeft, Upload, X, Save, Hourglass, CheckCircle2, Languages, Trash2 } from "lucide-react";
+import { ChevronLeft, Upload, X, Save, Hourglass, CheckCircle2, Languages, Trash2, Camera as CameraIcon } from "lucide-react";
 import { MobileShell, GlassHeader, PrimaryButton, Input, Label } from "../components/MobileShell";
 import { api } from "../lib/store";
 import { getSession, clearSession } from "../lib/auth";
+import { pickImagesFromGallery, takePhotoFromCamera } from "../lib/imagePicker";
 import { toast, Toaster } from "sonner";
 import {
   AlertDialog,
@@ -50,13 +51,19 @@ export default function ProviderProfileEdit() {
         try {
           const b = await api.getPublicBilling();
           if (b?.minRate && b?.maxRate) setLimits({ minRate: Number(b.minRate), maxRate: Number(b.maxRate) });
-        } catch (_) {}
+        } catch (_e) { /* ignore — use defaults */ }
       } catch { nav("/register"); }
     })();
   }, [nav]);
 
   const onPickFiles = async (e) => {
     const files = e.target.files;
+    if (!files?.length) return;
+    await uploadFiles(Array.from(files));
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const uploadFiles = async (files) => {
     if (!files?.length) return;
     for (const f of files) if (f.size > 8 * 1024 * 1024) { toast.error(`${f.name} > 8MB`); return; }
     setUploading(true);
@@ -65,8 +72,34 @@ export default function ProviderProfileEdit() {
       setForm((s) => ({ ...s, avatars: [...s.avatars, ...urls].slice(0, 8) }));
       toast.success(`${urls.length} image(s) uploaded`);
     } catch (err) { toast.error(err.message); }
-    finally { setUploading(false); if (fileRef.current) fileRef.current.value = ""; }
+    finally { setUploading(false); }
   };
+
+  // Native-friendly gallery picker — uses Capacitor Camera plugin on Android
+  // (reliable on Android 13+), falls back to hidden <input type=file> on web.
+  const pickFromGallery = async () => {
+    const remaining = 8 - form.avatars.length;
+    if (remaining <= 0) { toast.error("Maximum 8 images allowed"); return; }
+    try {
+      const picked = await pickImagesFromGallery(remaining);
+      if (!picked.length) return;
+      await uploadFiles(picked);
+    } catch (e) { toast.error(e?.message || "Could not open gallery"); }
+  };
+
+  // Capture a photo with the device camera (native only).
+  const pickFromCamera = async () => {
+    if (form.avatars.length >= 8) { toast.error("Maximum 8 images allowed"); return; }
+    try {
+      const photo = await takePhotoFromCamera();
+      if (!photo) return;
+      await uploadFiles([photo]);
+    } catch (e) { toast.error(e?.message || "Could not open camera"); }
+  };
+
+  const isNativeApp = (() => {
+    try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); } catch { return false; }
+  })();
   const removeImg = (i) => setForm((s) => ({ ...s, avatars: s.avatars.filter((_, idx) => idx !== i) }));
   const makeCover = (i) => setForm((s) => {
     if (i === 0) return s;
@@ -131,7 +164,7 @@ export default function ProviderProfileEdit() {
             <Hourglass className="w-5 h-5 text-[#6FA8FF] shrink-0 mt-0.5" />
             <div>
               <p className="font-heading font-semibold text-[#6FA8FF]">Profile under review</p>
-              <p className="text-xs text-[#A9B1CC] mt-1">Complete your details — admin will review and activate your listing. You won't appear in search until approved.</p>
+              <p className="text-xs text-[#A9B1CC] mt-1">Complete your details — admin will review and activate your listing. You won&apos;t appear in search until approved.</p>
             </div>
           </div>
         ) : (
@@ -245,17 +278,36 @@ export default function ProviderProfileEdit() {
         </div>
 
         <div className="bg-[#171C33] border border-white/5 rounded-2xl p-5 fade-up delay-2">
-          <Label>Profile images <span className="text-[10px] text-[#A9B1CC]">(first = cover, up to 8)</span></Label>
+          <Label>Profile images <span className="text-[10px] text-[#A9B1CC]">(first = cover, up to 8, max 8MB each)</span></Label>
           <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={onPickFiles} data-testid="pe-file-input" />
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading || form.avatars.length >= 8}
-            data-testid="pe-browse"
-            className="mt-2 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#6FA8FF]/40 text-[#6FA8FF] hover:bg-[#6FA8FF]/10 text-sm font-semibold disabled:opacity-50"
-          >
-            <Upload className="w-4 h-4" /> {uploading ? "Uploading…" : "Browse images"}
-          </button>
+
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={isNativeApp ? pickFromGallery : () => fileRef.current?.click()}
+              disabled={uploading || form.avatars.length >= 8}
+              data-testid="pe-browse"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#6FA8FF]/40 text-[#6FA8FF] hover:bg-[#6FA8FF]/10 text-sm font-semibold disabled:opacity-50 flex-1 justify-center min-w-[140px]"
+            >
+              <Upload className="w-4 h-4" /> {uploading ? "Uploading…" : "Choose from gallery"}
+            </button>
+            {isNativeApp && (
+              <button
+                type="button"
+                onClick={pickFromCamera}
+                disabled={uploading || form.avatars.length >= 8}
+                data-testid="pe-camera"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#10B981]/40 text-[#10B981] hover:bg-[#10B981]/10 text-sm font-semibold disabled:opacity-50 flex-1 justify-center min-w-[140px]"
+              >
+                <CameraIcon className="w-4 h-4" /> Take photo
+              </button>
+            )}
+          </div>
+
+          {form.avatars.length === 0 && (
+            <p className="mt-3 text-xs text-[#6E7694]">No images yet. Add at least one cover photo so users can see your profile.</p>
+          )}
+          <p className="mt-2 text-[10px] text-[#6E7694]">{form.avatars.length} / 8 images · tap <X className="inline w-3 h-3 -mt-0.5" /> on any image to delete</p>
 
           {form.avatars.length > 0 && (
             <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 gap-2.5">
@@ -263,11 +315,11 @@ export default function ProviderProfileEdit() {
                 <div key={url + i} className="relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-[#101428] group">
                   <img src={url} alt="" className="w-full h-full object-cover" />
                   {i === 0 && <span className="absolute bottom-1 left-1 text-[9px] font-bold bg-[#6FA8FF] text-black px-1.5 py-0.5 rounded">COVER</span>}
-                  <button onClick={() => removeImg(i)} data-testid={`pe-rm-${i}`} className="absolute top-1 right-1 w-6 h-6 bg-black/70 hover:bg-[#EF4444] rounded-full text-white flex items-center justify-center">
-                    <X className="w-3 h-3" />
+                  <button onClick={() => removeImg(i)} data-testid={`pe-rm-${i}`} aria-label="Delete image" className="absolute top-1 right-1 w-7 h-7 bg-black/80 hover:bg-[#EF4444] rounded-full text-white flex items-center justify-center shadow-lg border border-white/20">
+                    <X className="w-4 h-4" />
                   </button>
                   {i !== 0 && (
-                    <button onClick={() => makeCover(i)} className="absolute bottom-1 right-1 text-[9px] bg-black/70 text-white px-1.5 py-0.5 rounded">
+                    <button onClick={() => makeCover(i)} className="absolute bottom-1 right-1 text-[9px] bg-black/80 text-white px-1.5 py-0.5 rounded hover:bg-[#6FA8FF] hover:text-black">
                       Set cover
                     </button>
                   )}

@@ -1073,7 +1073,9 @@ app.delete("/api/admin/providers/:id", auth("admin"), async (req, res) => {
 app.post("/api/admin/upload", auth("admin"), (req, res) => {
   upload.array("files", 8)(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
-    const base = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+    const fromEnv = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+    const fromReq = `${req.protocol}://${req.get("host")}`;
+    const base = fromEnv || fromReq;
     const urls = (req.files || []).map((f) => `${base}/api/uploads/${f.filename}`);
     res.json({ urls });
   });
@@ -1083,7 +1085,11 @@ app.post("/api/admin/upload", auth("admin"), (req, res) => {
 app.post("/api/provider/upload", auth("provider"), (req, res) => {
   upload.array("files", 8)(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
-    const base = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+    // Build absolute base URL: prefer PUBLIC_URL env, otherwise reconstruct from
+    // the request itself so URLs work both on dev sandbox and production VPS.
+    const fromEnv = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+    const fromReq = `${req.protocol}://${req.get("host")}`;
+    const base = fromEnv || fromReq;
     const urls = (req.files || []).map((f) => `${base}/api/uploads/${f.filename}`);
     res.json({ urls });
   });
