@@ -2004,6 +2004,38 @@ const findActiveCall = (a, b) => {
   );
 };
 
+// ----- RINGING SESSIONS (pre-acceptance) -----
+// Tracks an in-flight call/chat invite from caller -> callee so we can:
+//   1) dedupe FCM/webpush spam when caller's UI retries call_request every 2.5s
+//      (without this, every retry re-launches IncomingCallActivity on Android)
+//   2) know whether to honour a late call_accept (if the session is already
+//      rejected/cancelled, ignore the accept — prevents auto-accept ghost calls)
+// Key format: `${callerId}>${calleeId}`. Cleaned up on accept/reject/cancel/TTL.
+const ringingSessions = new Map();
+const RINGING_TTL_MS = 60 * 1000;
+const ringKey = (from, to) => `${from}>${to}`;
+const startRinging = (from, to, channel) => {
+  ringingSessions.set(ringKey(from, to), {
+    from, to, channel, startedAt: Date.now(), status: "ringing",
+  });
+};
+const getRinging = (from, to) => {
+  const s = ringingSessions.get(ringKey(from, to));
+  if (!s) return null;
+  if (Date.now() - s.startedAt > RINGING_TTL_MS) {
+    ringingSessions.delete(ringKey(from, to));
+    return null;
+  }
+  return s;
+};
+const endRinging = (from, to, status) => {
+  const k = ringKey(from, to);
+  const s = ringingSessions.get(k);
+  if (s) s.status = status;
+  // keep a short tombstone so a late call_accept is rejected
+  setTimeout(() => ringingSessions.delete(k), 5000);
+};
+
 io.on("connection", (socket) => {
 
   // REGISTER
@@ -2068,6 +2100,14 @@ io.on("connection", (socket) => {
       from,
     });
 
+    // Dedupe heavy notifications (FCM full-screen UI + webpush) so the
+    // caller's 2.5s retry interval doesn't re-fire IncomingCallActivity.
+    const existing = getRinging(from, to);
+    if (existing && existing.status === "ringing") {
+      return; // already pushed once; socket relay above is enough
+    }
+    startRinging(from, to, "call");
+
     // PUSH NOTIFICATION — always fire so WebView/minimized apps receive
     // an OS-level alert with sound + vibration, regardless of socket state.
     // The service worker also messages any open clients to start the in-app
@@ -2100,6 +2140,17 @@ io.on("connection", (socket) => {
       const providerId = socket.data.id;
 
       if (!userId || !providerId) return;
+
+      // If the user already cancelled (or rejected for some reason), don't
+      // proceed — this prevents the "auto-accept after caller hung up" ghost
+      // call where Android IncomingCallActivity got tapped after FCM cancel
+      // hadn't propagated yet.
+      const ring = ringingSessions.get(ringKey(userId, providerId));
+      if (ring && ring.status !== "ringing") {
+        deliver("call_end", providerId, { reason: ring.status });
+        return;
+      }
+      endRinging(userId, providerId, "accepted");
 
       const billing = await Settings.findOne({
         key: "billing",
@@ -2440,6 +2491,12 @@ io.on("connection", (socket) => {
 
     deliver("chat_request", to, { ...msg, from });
 
+    const existing = getRinging(from, to);
+    if (existing && existing.status === "ringing") {
+      return;
+    }
+    startRinging(from, to, "chat");
+
     pushToOwner(to, {
       type: "incoming_chat",
       title: "💬 New chat · EMORVIA",
@@ -2466,6 +2523,13 @@ io.on("connection", (socket) => {
       const userId = msg.to;
       const providerId = socket.data.id;
       if (!userId || !providerId) return;
+
+      const ring = ringingSessions.get(ringKey(userId, providerId));
+      if (ring && ring.status !== "ringing") {
+        deliver("chat_end", providerId, { reason: ring.status });
+        return;
+      }
+      endRinging(userId, providerId, "accepted");
 
       const billing = await Settings.findOne({ key: "billing" });
       const globalSharePct = Number(billing?.value?.providerSharePct ?? DEFAULT_PROVIDER_SHARE_PCT);
@@ -2644,16 +2708,90 @@ io.on("connection", (socket) => {
     }
   });
 
-  // CHAT REJECT — relay only
+  // CHAT REJECT — relay + clear ringing + dismiss native UI on rejecter's device
   socket.on("chat_reject", (msg = {}) => {
     const to = msg.to;
-    if (!to) return;
-    deliver("chat_reject", to, { ...msg, from: socket.data.id });
+    const from = socket.data.id;
+    if (!to || !from) return;
+    endRinging(to, from, "rejected");
+    deliver("chat_reject", to, { ...msg, from });
+    // Tell Android/WebView on the rejecter's own device to close any chat UI
+    sendFcmToOwner(from, {
+      type: "call_cancel",
+      callerId: to,
+      ts: Date.now(),
+    }).catch(() => {});
+    pushToOwner(from, {
+      type: "call_cancel",
+      callerId: to,
+      tag: `call-${to}`,
+    }).catch(() => {});
   });
 
-  // OTHER SOCKET EVENTS
+  // CALL REJECT (callee → caller) — same as chat_reject but for voice/video.
+  // Special: also push a dismiss-FCM to the rejecter's own device so the
+  // full-screen IncomingCallActivity (launched by an earlier call_request
+  // FCM) gets closed immediately.
+  socket.on("call_reject", (msg = {}) => {
+    const to = msg.to;
+    const from = socket.data.id;
+    if (!to || !from) return;
+    endRinging(to, from, "rejected");
+    deliver("call_reject", to, { ...msg, from });
+    sendFcmToOwner(from, {
+      type: "call_cancel",
+      callerId: to,
+      ts: Date.now(),
+    }).catch(() => {});
+    pushToOwner(from, {
+      type: "call_cancel",
+      callerId: to,
+      tag: `call-${to}`,
+    }).catch(() => {});
+  });
+
+  // CALL CANCEL (caller → callee) — caller hangs up before callee accepts.
+  // Distinct from call_end (which is mid-call hang up). Tells the callee's
+  // socket + Android full-screen activity to dismiss.
+  socket.on("call_cancel", (msg = {}) => {
+    const to = msg.to;
+    const from = socket.data.id;
+    if (!to || !from) return;
+    endRinging(from, to, "cancelled");
+    deliver("call_cancel", to, { ...msg, from });
+    sendFcmToOwner(to, {
+      type: "call_cancel",
+      callerId: from,
+      ts: Date.now(),
+    }).catch(() => {});
+    pushToOwner(to, {
+      type: "call_cancel",
+      callerId: from,
+      tag: `call-${from}`,
+    }).catch(() => {});
+  });
+
+  // CHAT CANCEL (caller → callee) — chat invite withdrawn before accept.
+  socket.on("chat_cancel", (msg = {}) => {
+    const to = msg.to;
+    const from = socket.data.id;
+    if (!to || !from) return;
+    endRinging(from, to, "cancelled");
+    deliver("chat_cancel", to, { ...msg, from });
+    sendFcmToOwner(to, {
+      type: "call_cancel",
+      callerId: from,
+      ts: Date.now(),
+    }).catch(() => {});
+    pushToOwner(to, {
+      type: "call_cancel",
+      callerId: from,
+      tag: `call-${from}`,
+    }).catch(() => {});
+  });
+
+  // OTHER SOCKET EVENTS (pure relay)
   [
-    "call_reject",
     "webrtc_offer",
     "webrtc_answer",
     "webrtc_ice",
@@ -2718,6 +2856,31 @@ io.on("connection", (socket) => {
               },
             }
           );
+        }
+
+        // FORCE END ringing sessions where this socket was the caller
+        // (caller disconnected without sending call_cancel — clean up the
+        // callee's incoming UI / Android full-screen activity).
+        for (const [k, s] of ringingSessions.entries()) {
+          if (s.from === id && s.status === "ringing") {
+            const evt = s.channel === "chat" ? "chat_cancel" : "call_cancel";
+            deliver(evt, s.to, { from: id, reason: "disconnect" });
+            sendFcmToOwner(s.to, {
+              type: "call_cancel",
+              callerId: id,
+              ts: Date.now(),
+            }).catch(() => {});
+            pushToOwner(s.to, {
+              type: "call_cancel",
+              callerId: id,
+              tag: `call-${id}`,
+            }).catch(() => {});
+            ringingSessions.delete(k);
+          } else if (s.to === id && s.status === "ringing") {
+            // callee disconnected mid-ring — tell caller their call timed out
+            deliver("call_reject", s.from, { from: id, reason: "offline" });
+            ringingSessions.delete(k);
+          }
         }
       }
 

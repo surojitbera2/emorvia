@@ -3,8 +3,10 @@ package com.emorvia.app;
 import android.app.Activity;
 import android.app.KeyguardManager;
 import android.app.NotificationManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
@@ -24,9 +26,30 @@ import android.widget.TextView;
  * extras so the React layer can navigate to the provider call screen.
  */
 public class IncomingCallActivity extends Activity {
+    /** Broadcast sent by MyFirebaseMessagingService when the caller cancels or
+     *  the call gets rejected on another device — closes this full-screen UI. */
+    public static final String ACTION_DISMISS_CALL = "com.emorvia.app.DISMISS_CALL";
+
     private Ringtone ringtone;
     private Vibrator vibrator;
     private PowerManager.WakeLock wakeLock;
+    private String currentCallerId;
+    private final BroadcastReceiver dismissReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String incomingCallerId = intent.getStringExtra("callerId");
+            // If the broadcast specifies a callerId, only dismiss when it matches
+            // the call we're currently showing — protects against an unrelated
+            // cancel racing in front of a fresh incoming call.
+            if (incomingCallerId != null && currentCallerId != null
+                    && !incomingCallerId.equals(currentCallerId)) {
+                return;
+            }
+            stopRingtone();
+            dismissCallNotification();
+            finish();
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,7 +89,17 @@ public class IncomingCallActivity extends Activity {
         String callerName = getIntent().getStringExtra("callerName");
         if (callerName == null || callerName.isEmpty()) callerName = "Someone";
         final String callerId = getIntent().getStringExtra("callerId");
+        currentCallerId = callerId;
         final String callType = getIntent().getStringExtra("callType");
+
+        // Register receiver so backend can remotely dismiss this screen when
+        // the caller cancels or the call is rejected from another device.
+        IntentFilter filter = new IntentFilter(ACTION_DISMISS_CALL);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(dismissReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(dismissReceiver, filter);
+        }
 
         TextView tvName = findViewById(R.id.tv_caller_name);
         TextView tvType = findViewById(R.id.tv_call_type);
@@ -138,6 +171,7 @@ public class IncomingCallActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        try { unregisterReceiver(dismissReceiver); } catch (Exception ignored) {}
         stopRingtone();
         try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Exception ignored) {}
     }

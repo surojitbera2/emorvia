@@ -59,6 +59,9 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             case "incoming_call":
                 showIncomingCallNotification(data);
                 break;
+            case "call_cancel":
+                dismissIncomingCall(data);
+                break;
             case "incoming_chat":
             case "chat_message":
                 showChatNotification(data);
@@ -68,6 +71,28 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
                 showChatNotification(data);
                 break;
         }
+    }
+
+    /**
+     * Caller hung up / callee rejected before answer. We must:
+     *   - cancel the call notification (id 1001)
+     *   - finish IncomingCallActivity if it's currently showing
+     */
+    private void dismissIncomingCall(Map<String, String> data) {
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) {
+            nm.cancel(CALL_NOTIF_ID);
+            String callerId = data.get("callerId");
+            if (callerId != null && !callerId.isEmpty()) {
+                int chatId = CHAT_NOTIF_ID_BASE + (Math.abs(callerId.hashCode()) % 1000);
+                nm.cancel(chatId);
+            }
+        }
+        Intent broadcast = new Intent(IncomingCallActivity.ACTION_DISMISS_CALL);
+        broadcast.setPackage(getPackageName());
+        String callerId = data.get("callerId");
+        if (callerId != null) broadcast.putExtra("callerId", callerId);
+        sendBroadcast(broadcast);
     }
 
     private void showIncomingCallNotification(Map<String, String> data) {

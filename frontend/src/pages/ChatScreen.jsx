@@ -177,7 +177,10 @@ export default function ChatScreen() {
 
     // Notify provider
     if (!peerDisconnected) {
-      signaling.send("chat_end", providerId, { reason: auto ? "auto" : "user_ended" });
+      // If still in ringing phase (provider hasn't accepted), this is a
+      // cancel — tell provider to dismiss incoming UI / native call activity.
+      const evt = phaseRef.current === "ringing" ? "chat_cancel" : "chat_end";
+      signaling.send(evt, providerId, { reason: auto ? "auto" : "user_ended" });
     }
 
     // Backend will charge via socket chat_end too, but we POST /api/call/log to be sure

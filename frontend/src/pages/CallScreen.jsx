@@ -248,7 +248,13 @@ export default function CallScreen() {
     setEnded(true);
     setPhase("ended");
     const p = providerRef.current;
-    if (!fromRemote && p) signaling.send("call_end", p.id);
+    if (!fromRemote && p) {
+      // While still ringing this is a cancel (caller hung up before callee
+      // answered) → tell callee to dismiss incoming dialog + Android UI.
+      // Once connected, it's a mid-call hangup → call_end so server bills.
+      const evt = phase === "connected" ? "call_end" : "call_cancel";
+      signaling.send(evt, p.id);
+    }
     cleanup();
     if (p && secondsRef.current > 0 && !logSent.current) {
       logSent.current = true;

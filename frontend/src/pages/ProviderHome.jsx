@@ -73,6 +73,26 @@ export default function ProviderHome() {
       });
     });
 
+    // Caller hung up before we accepted — dismiss the incoming dialog and
+    // stop the ringtone. Also closes any web notification still showing.
+    const dismissIncomingFrom = (fromId) => {
+      setIncoming((cur) => {
+        if (cur && cur.from === fromId) {
+          ringtone.stop();
+          if ("Notification" in window && navigator.serviceWorker) {
+            navigator.serviceWorker.getRegistration().then((reg) => {
+              reg?.getNotifications({ tag: "incoming-call" }).then((ns) => ns.forEach((n) => n.close())).catch(() => {});
+              reg?.getNotifications({ tag: "incoming-chat" }).then((ns) => ns.forEach((n) => n.close())).catch(() => {});
+            }).catch(() => {});
+          }
+          return null;
+        }
+        return cur;
+      });
+    };
+    const offCallCancel = signaling.on("call_cancel", (m) => dismissIncomingFrom(m.from));
+    const offChatCancel = signaling.on("chat_cancel", (m) => dismissIncomingFrom(m.from));
+
     // Listen for Service Worker messages so push notifications can:
     //  - start the in-app ringtone even if the foreground tab missed the socket event
     //  - stop ringtone when user dismisses the notification
@@ -85,6 +105,9 @@ export default function ProviderHome() {
         ringtone.stop();
       } else if (m.type === "notification-click") {
         // App was already open — refocus, the incoming dialog should already show
+      } else if (m.type === "incoming-call-cancel") {
+        ringtone.stop();
+        setIncoming(null);
       }
     };
     if ("serviceWorker" in navigator) {
@@ -94,6 +117,8 @@ export default function ProviderHome() {
     return () => {
       offReq();
       offChatReq();
+      offCallCancel();
+      offChatCancel();
       ringtone.stop();
       if ("serviceWorker" in navigator) {
         navigator.serviceWorker.removeEventListener("message", onSwMessage);

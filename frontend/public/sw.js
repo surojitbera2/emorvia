@@ -49,6 +49,22 @@ self.addEventListener("push", (event) => {
   if (event.data) {
     try { data = event.data.json(); } catch { data = { title: "Bongo Bandhu", body: event.data.text() }; }
   }
+  // Caller cancelled / callee rejected → close any in-flight call notification
+  // and tell open clients to stop the in-app ringtone.
+  if (data.type === "call_cancel") {
+    event.waitUntil((async () => {
+      try {
+        const tags = ["incoming-call", "incoming-chat"];
+        if (data.tag) tags.push(data.tag);
+        for (const t of tags) {
+          const ns = await self.registration.getNotifications({ tag: t });
+          ns.forEach((n) => n.close());
+        }
+      } catch {}
+      await notifyClients({ type: "incoming-call-cancel", data });
+    })());
+    return;
+  }
   const isCall = data.type === "incoming_call";
   const title = data.title || "Bongo Bandhu";
   const options = {

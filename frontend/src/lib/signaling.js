@@ -10,9 +10,9 @@ import { io } from "socket.io-client";
 const BACKEND = process.env.REACT_APP_BACKEND_URL || "";
 
 const EVENTS = [
-  "call_request", "call_accept", "call_reject",
+  "call_request", "call_accept", "call_reject", "call_cancel",
   "webrtc_offer", "webrtc_answer", "webrtc_ice", "call_end",
-  "chat_request", "chat_accept", "chat_reject",
+  "chat_request", "chat_accept", "chat_reject", "chat_cancel",
   "chat_message", "chat_typing", "chat_end",
 ];
 
