@@ -3,9 +3,11 @@ require_once __DIR__ . '/../config.php';
 admin_require_login();
 
 $GATEWAYS = [
-    ['cashfree',        'Cashfree (Payments)',  'App ID',     'Secret Key'],
-    ['razorpay',        'Razorpay',             'Key ID',     'Key Secret'],
-    ['cashfree_payout', 'Cashfree Payouts V2',  'X-Client-Id','X-Client-Secret'],
+    ['cashfree',        'Cashfree (Payments)',  'App ID',         'Secret Key'],
+    ['razorpay',        'Razorpay',             'Key ID',         'Key Secret'],
+    ['easebuzz',        'Easebuzz (Payments)',  'Merchant Key',   'Salt'],
+    ['cashfree_payout', 'Cashfree Payouts V2',  'X-Client-Id',    'X-Client-Secret'],
+    ['easebuzz_wire',   'Easebuzz Wire (Payouts)', 'Wire API Key','Wire API Salt / Secret'],
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -59,10 +61,16 @@ include __DIR__ . '/header_admin.php';
           <input type="text" name="<?= $n ?>_key_secret" value="<?= h($mask($g['key_secret'])) ?>" placeholder="<?= h($sLabel) ?>" />
           <small>Leave masked value unchanged to keep current secret.</small>
         </label>
-        <?php if ($n !== 'cashfree_payout'): ?>
+        <?php if (!in_array($n, ['cashfree_payout', 'easebuzz_wire'], true)): ?>
         <label><span>Webhook Secret <span class="muted">(optional)</span></span>
           <input type="text" name="<?= $n ?>_webhook_secret" value="<?= h($mask($g['webhook_secret'])) ?>" placeholder="Used to verify direct gateway webhooks" />
         </label>
+        <?php endif; ?>
+        <?php if ($n === 'easebuzz_wire'): ?>
+        <p class="muted" style="margin:6px 0 0">
+          <strong>Note:</strong> Easebuzz Wire API docs are shared privately by Easebuzz. Save your credentials here;
+          actual UPI payout calls become active once <code>lib/easebuzz_wire.php</code> is completed with the Wire API spec.
+        </p>
         <?php endif; ?>
       </fieldset>
     <?php endforeach; ?>
@@ -74,6 +82,8 @@ include __DIR__ . '/header_admin.php';
       <li><strong>Cashfree Payments (PG):</strong> Dashboard → Payment Gateway → Developers → API Keys (2FA required for production keys).</li>
       <li><strong>Cashfree Payouts V2:</strong> Dashboard → Payouts → Developers → API Keys. <em>Separate</em> from PG keys — different product.</li>
       <li><strong>Razorpay:</strong> Dashboard → Account &amp; Settings → API Keys. Generate separately for Test and Live.</li>
+      <li><strong>Easebuzz Payments:</strong> Dashboard (<code>dashboard.easebuzz.in</code>) → Settings → API Keys → <em>Merchant Key</em> &amp; <em>Salt</em>. Use Test credentials on <code>testdashboard.easebuzz.in</code> first.</li>
+      <li><strong>Easebuzz Wire (Payouts):</strong> Activate Wire from Easebuzz dashboard, then request API credentials &amp; docs from Easebuzz support (<code>integration@easebuzz.in</code>).</li>
     </ul>
   </div>
 </div>

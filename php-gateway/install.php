@@ -54,7 +54,7 @@ try {
 
     // Seed gateway rows (disabled by default).
     // 'cashfree_payout' is a separate row because Payouts uses different API keys than PG.
-    foreach (['cashfree', 'razorpay', 'cashfree_payout'] as $g) {
+    foreach (['cashfree', 'razorpay', 'cashfree_payout', 'easebuzz', 'easebuzz_wire'] as $g) {
         if (!gateway_get($g)) {
             gateway_save($g, ['enabled' => 0, 'mode' => 'test', 'key_id' => '', 'key_secret' => '', 'webhook_secret' => '']);
         }

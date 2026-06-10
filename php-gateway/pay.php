@@ -36,17 +36,22 @@ if (!payment_get($orderId)) {
 // Determine enabled gateways
 $cf = gateway_get('cashfree');
 $rp = gateway_get('razorpay');
+$eb = gateway_get('easebuzz');
 $cfEnabled = $cf && (int)$cf['enabled'] === 1 && $cf['key_id'] && $cf['key_secret'];
 $rpEnabled = $rp && (int)$rp['enabled'] === 1 && $rp['key_id'] && $rp['key_secret'];
+$ebEnabled = $eb && (int)$eb['enabled'] === 1 && $eb['key_id'] && $eb['key_secret'];
 
-if (!$cfEnabled && !$rpEnabled) {
+if (!$cfEnabled && !$rpEnabled && !$ebEnabled) {
     render_error('Payment unavailable', 'No payment gateway is enabled. Please contact the merchant.');
 }
 
 // Auto-pick single available gateway
 if (!$picked) {
-    if ($cfEnabled && !$rpEnabled) $picked = 'cashfree';
-    elseif ($rpEnabled && !$cfEnabled) $picked = 'razorpay';
+    $enabledList = [];
+    if ($cfEnabled) $enabledList[] = 'cashfree';
+    if ($rpEnabled) $enabledList[] = 'razorpay';
+    if ($ebEnabled) $enabledList[] = 'easebuzz';
+    if (count($enabledList) === 1) $picked = $enabledList[0];
 }
 
 // If user has picked a gateway, redirect to that flow
@@ -125,6 +130,30 @@ if ($picked === 'razorpay' && $rpEnabled) {
     exit;
 }
 
+if ($picked === 'easebuzz' && $ebEnabled) {
+    $callbackUrl = base_url() . '/callback/easebuzz.php?order_id=' . rawurlencode($orderId);
+    $customer = [
+        'name'  => $order['customerName']  ?? 'Customer',
+        'email' => $order['customerEmail'] ?? 'noreply@example.com',
+        'phone' => $order['customerPhone'] ?? '',
+    ];
+    $r = easebuzz_initiate_payment(
+        $eb,
+        $orderId,
+        (float)$order['amount'],
+        $customer,
+        $callbackUrl, // surl
+        $callbackUrl, // furl — Easebuzz POSTs to the same handler; we check status server-side
+        'Wallet Recharge'
+    );
+    if (!$r['ok']) render_error('Easebuzz error', $r['error']);
+    payment_update($orderId, ['gateway' => 'easebuzz', 'gateway_order_id' => $r['access_key']]);
+
+    // Server-side redirect to Easebuzz hosted checkout
+    header('Location: ' . $r['redirect_url']);
+    exit;
+}
+
 // Otherwise — show gateway selection page
 include __DIR__ . '/assets/header.php';
 ?>
@@ -145,6 +174,12 @@ include __DIR__ . '/assets/header.php';
     <?php if ($rpEnabled): ?>
     <a class="gw-btn" href="pay.php?order_id=<?= h(urlencode($orderId)) ?>&gateway=razorpay">
       <div class="gw-name">Razorpay</div>
+      <div class="gw-desc">UPI · Cards · Net Banking · Wallets</div>
+    </a>
+    <?php endif; ?>
+    <?php if ($ebEnabled): ?>
+    <a class="gw-btn" href="pay.php?order_id=<?= h(urlencode($orderId)) ?>&gateway=easebuzz">
+      <div class="gw-name">Easebuzz</div>
       <div class="gw-desc">UPI · Cards · Net Banking · Wallets</div>
     </a>
     <?php endif; ?>

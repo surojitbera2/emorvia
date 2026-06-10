@@ -1,6 +1,6 @@
-# BongoBandhu — PHP Payment Gateway (Cashfree + Razorpay)
+# BongoBandhu — PHP Payment Gateway (Cashfree + Razorpay + Easebuzz)
 
-A standalone PHP application that acts as a bridge between your Node.js BongoBandhu backend and the **Cashfree** & **Razorpay** payment gateways. The Node.js app redirects users here with only an `order_id`; this app handles the gateway flow and credits the wallet via a signed webhook.
+A standalone PHP application that acts as a bridge between your Node.js BongoBandhu backend and the **Cashfree**, **Razorpay** & **Easebuzz** payment gateways. The Node.js app redirects users here with only an `order_id`; this app handles the gateway flow and credits the wallet via a signed webhook.
 
 ## Architecture
 
@@ -77,7 +77,17 @@ Log into the PHP admin and configure:
    - Get keys from Razorpay Dashboard → *Account & Settings* → *API Keys*.
    - Enable, choose Mode (Test / Live), paste **Key ID** and **Key Secret**.
 
-You can enable one or both. If both are enabled, the user sees a chooser screen.
+4. **Gateways → Easebuzz (Payments)**
+   - Get keys from Easebuzz Dashboard → *Settings* → *API Keys* (test creds from `testdashboard.easebuzz.in`).
+   - Enable, choose Mode (Test / Live), paste **Merchant Key** and **Salt**.
+   - Easebuzz hosted checkout opens on `pay.easebuzz.in` / `testpay.easebuzz.in`.
+
+5. **Gateways → Easebuzz Wire (Payouts)** *(implementation pending — see note below)*
+   - Activate Wire on your Easebuzz dashboard.
+   - Request Wire API credentials & docs from Easebuzz support (`integration@easebuzz.in`).
+   - Save the credentials here; UPI payout calls will activate once `lib/easebuzz_wire.php` is completed with the Wire API spec.
+
+You can enable any combination. If multiple are enabled, the user sees a chooser screen.
 
 ## Test Flow
 
@@ -92,6 +102,7 @@ You can enable one or both. If both are enabled, the user sees a chooser screen.
 ### Test cards / UPI
 - **Cashfree sandbox**: `4111 1111 1111 1111`, exp `12/30`, CVV `123`, OTP `1111`. UPI VPA: `success@gocash`.
 - **Razorpay test**: `4111 1111 1111 1111`, any future expiry, any CVV, OTP `1111`. UPI VPA: `success@razorpay`.
+- **Easebuzz test**: see <https://docs.easebuzz.in/docs/payment-gateway/wlt03odp7gzk5-testing-credentials>. Common UPI VPA: `success@easebuzz`; test card `5123 4567 8901 2346`, exp any future, CVV `123`, OTP `123456`.
 
 ## Security Notes
 - The `Shared Secret` is the **only** thing protecting the order-lookup and callback APIs on Node.js. Keep it long and private. Rotate it if leaked.
@@ -145,4 +156,6 @@ php-gateway/
 | "invalid signature" in Node logs after payment | Shared Secret was changed; re-save same secret on both sides |
 | Cashfree "Invalid x-client-id" | Wrong keys for selected mode (test/live mix-up) |
 | Razorpay BAD_REQUEST_ERROR on order create | Amount too low, or live keys used with un-activated account |
+| Easebuzz `Invalid hash` / `status:0` | Salt mismatch with Merchant Key, or mixing test/live credentials. Each env has its own key+salt pair. |
+| Easebuzz `Amount must contain a decimal point` | This code always sends `"100.00"`; if you see this, check that `lib/easebuzz.php` was not modified to send integer amounts. |
 | Webhook never reaches Node | Both servers must be HTTPS-reachable from each other; check firewall |

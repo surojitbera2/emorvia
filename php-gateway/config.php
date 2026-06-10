@@ -31,3 +31,5 @@ require_once __DIR__ . '/lib/node_api.php';
 require_once __DIR__ . '/lib/cashfree.php';
 require_once __DIR__ . '/lib/cashfree_payouts.php';
 require_once __DIR__ . '/lib/razorpay.php';
+require_once __DIR__ . '/lib/easebuzz.php';
+require_once __DIR__ . '/lib/easebuzz_wire.php';
