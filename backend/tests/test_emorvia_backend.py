@@ -16,7 +16,7 @@ import math
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://private-call-handler.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://php-easepay.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
 USER_BYPASS_MOBILE = "7777777777"
