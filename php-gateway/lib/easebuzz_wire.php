@@ -3,59 +3,106 @@
 // Easebuzz Wire — UPI / IMPS / NEFT Payouts (TO listeners)
 // =====================================================================
 //
-// !!! IMPLEMENTATION PENDING !!!
+// MODE: Manual-dashboard workflow
+// -----------------------------------------------------------------
+// The Easebuzz Wire **API** is not publicly documented — Easebuzz
+// shares it privately after activation. Until those docs are obtained
+// from Easebuzz support, this integration runs in *manual* mode:
 //
-// Easebuzz Wire API docs are NOT publicly available — they are shared
-// privately with merchants by Easebuzz support after Wire is activated
-// on your account.
+//   1. Admin clicks "Pay via Easebuzz" on a pending listener row.
+//   2. PHP opens the Easebuzz Wire dashboard in a new tab with the
+//      payout amount + listener UPI VPA pre-filled (where supported).
+//   3. Admin completes the UPI payout inside Easebuzz Wire dashboard.
+//   4. Admin returns to PHP admin, pastes the UTR / Bank Reference,
+//      and clicks "Mark Paid".
+//   5. PHP records the payout locally and notifies the Node.js backend
+//      so the listener's wallet/earnings are marked paid in MongoDB.
 //
-// Once you obtain the docs (or a working cURL/Postman sample), fill in
-// the functions below. The skeleton matches the same shape used by the
-// Cashfree Payouts integration (see lib/cashfree_payouts.php) so it can
-// plug into admin/payouts.php with minimal changes.
+// When the Wire API spec becomes available, fill in ebw_payout_transfer()
+// below and switch admin/payouts.php to call that instead of the manual
+// confirmation flow. The notify_node helper already returns the same
+// shape the Cashfree integration uses, so swapping is straightforward.
 //
-// What's needed to finish this file:
-//   1. Wire API base URLs (test + live)
-//   2. Authentication: header names (e.g. x-api-key / Bearer) or
-//      hash-based signing (sequence + algo)
-//   3. POST endpoint for creating a UPI transfer
-//   4. Request payload shape (beneficiary, amount, transfer_id, etc.)
-//   5. Response shape (status codes that mean success / pending / failed)
-//
-// Credentials are already wired into the admin UI under name="easebuzz_wire":
-//   key_id     → Wire API Key / Client ID
-//   key_secret → Wire API Secret / Salt
+// Credentials are stored in `gateways` table under name="easebuzz_wire":
+//   key_id     → (future) Wire API Key / Client ID
+//   key_secret → (future) Wire API Secret / Salt
 //   mode       → 'test' or 'live'
-//
 // =====================================================================
 
+function ebw_dashboard_url($mode = 'live') {
+    // Easebuzz Wire dashboard. Admin logs in here to send payouts manually.
+    return $mode === 'live'
+        ? 'https://wire.easebuzz.in/'
+        : 'https://testwire.easebuzz.in/';
+}
+
+/**
+ * Notify the Node.js backend that an Easebuzz Wire payout has been
+ * completed manually (after admin enters UTR in the PHP admin).
+ *
+ * Uses the same /api/ext-payout/complete endpoint that the Cashfree
+ * integration uses — Node.js doesn't care which gateway sent the money,
+ * it just marks the payout as completed in MongoDB.
+ *
+ * @return array {ok, http, response, error}
+ */
+function ebw_payout_notify_node($providerId, $amount, $transferId, $utr, $status, $note = '') {
+    $cfg = node_config();
+    if (!$cfg['base_url'] || !$cfg['shared_secret']) {
+        return ['ok' => false, 'error' => 'Node.js gateway not configured in admin settings'];
+    }
+    $payload = json_encode([
+        'providerId'   => $providerId,
+        'amount'       => (float)$amount,
+        'transferId'   => $transferId,
+        'cfTransferId' => $utr, // re-using key name; Node treats it as opaque external id
+        'status'       => $status,
+        'note'         => $note ?: ('Easebuzz Wire (manual) · UTR ' . $utr),
+        'ts'           => time(),
+    ]);
+    $sig = hash_hmac('sha256', $payload, $cfg['shared_secret']);
+    $url = rtrim($cfg['base_url'], '/') . '/api/ext-payout/complete';
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $payload,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_HTTPHEADER     => [
+            'Content-Type: application/json',
+            'X-Gateway-Signature: ' . $sig,
+        ],
+    ]);
+    $body = curl_exec($ch);
+    $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err  = curl_error($ch);
+    curl_close($ch);
+
+    return [
+        'ok'       => $http >= 200 && $http < 300,
+        'http'     => $http,
+        'response' => $body,
+        'error'    => $err ?: ($http >= 400 ? $body : null),
+    ];
+}
+
+// ---------------------------------------------------------------------
+// Future API integration (stub) — fill in once Wire API docs are obtained.
+// ---------------------------------------------------------------------
 function ebw_base_url($mode) {
-    // TODO: replace once Easebuzz Wire docs are obtained.
     return $mode === 'live'
         ? 'https://wire.easebuzz.in/'       // placeholder
         : 'https://testwire.easebuzz.in/';  // placeholder
 }
 
-/**
- * Initiate a UPI payout to a listener.
- *
- * @param array  $g            gateway row (mode, key_id, key_secret)
- * @param string $transferId   unique transfer id (alphanumeric, ≤40 chars)
- * @param float  $amount       INR
- * @param string $vpa          beneficiary UPI VPA (e.g. "name@upi")
- * @param string $beneficiaryName
- * @param string $beneficiaryId
- * @param string $remarks
- * @return array {ok, status, transfer_id, ebw_transfer_id, error, raw}
- */
 function ebw_payout_transfer($g, $transferId, $amount, $vpa, $beneficiaryName, $beneficiaryId, $remarks = '') {
     return [
         'ok'    => false,
-        'error' => 'Easebuzz Wire integration is not yet implemented. '
-                 . 'Please provide Wire API docs to the admin developer to enable this feature.',
+        'error' => 'Easebuzz Wire programmatic API is not yet implemented. Use the manual confirmation flow in admin/payouts.php.',
     ];
 }
 
 function ebw_payout_get_status($g, $transferId) {
-    return ['ok' => false, 'error' => 'Easebuzz Wire integration is not yet implemented.'];
+    return ['ok' => false, 'error' => 'Easebuzz Wire programmatic API is not yet implemented.'];
 }

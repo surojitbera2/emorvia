@@ -69,6 +69,7 @@ try {
         amount DECIMAL(12,2) NOT NULL,
         transfer_id VARCHAR(64) UNIQUE NOT NULL,
         cf_transfer_id VARCHAR(64) DEFAULT '',
+        provider VARCHAR(32) DEFAULT 'cashfree',
         status VARCHAR(32) DEFAULT 'pending',
         status_description TEXT,
         node_notified TINYINT(1) DEFAULT 0,
@@ -79,6 +80,9 @@ try {
         INDEX idx_provider (provider_id),
         INDEX idx_status (status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    // Idempotent migration: add `provider` column on older installs that don't have it.
+    try { $pdo->exec("ALTER TABLE payouts ADD COLUMN provider VARCHAR(32) DEFAULT 'cashfree'"); } catch (Throwable $e) { /* already exists */ }
 
     echo "<h2>BongoBandhu Payment Gateway — Install Successful</h2>";
     echo "<p>Database tables created. Default admin user:</p>";
