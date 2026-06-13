@@ -1,22 +1,43 @@
 <?php
 require_once __DIR__ . '/../config.php';
+
+// Optional debug switch: append ?debug=1 to the URL to surface PHP errors.
+// Remove or set false once issue is diagnosed.
+if (!empty($_GET['debug'])) {
+    ini_set('display_errors', '1');
+    error_reporting(E_ALL);
+}
+
 admin_require_login();
 $page = 'payouts';
 
-$g      = gateway_get('cashfree_payout');
-$ebw    = gateway_get('easebuzz_wire');
-$node   = node_config();
+$g   = gateway_get('cashfree_payout');
+$ebw = gateway_get('easebuzz_wire');
 
-$cfReady  = $g   && (int)$g['enabled']   === 1 && !empty($g['key_id'])  && !empty($g['key_secret']);
-$ebwReady = $ebw && (int)$ebw['enabled'] === 1; // manual flow: credentials are optional for now
+// Be tolerant if a gateway row hasn't been seeded yet (install.php not re-run)
+$cfReady  = is_array($g)   && (int)($g['enabled']   ?? 0) === 1 && !empty($g['key_id']) && !empty($g['key_secret']);
+$ebwReady = is_array($ebw) && (int)($ebw['enabled'] ?? 0) === 1; // manual flow: credentials are optional
 
 $flash_ok  = '';
 $flash_err = '';
 
-// === Schema migration (idempotent): add `provider` column to payouts table ===
+// === Schema migration (idempotent): add `provider` column if missing ===
+// Use information_schema lookup first so we never even try the ALTER when
+// the column already exists — avoids any PDO state issues on shared hosting.
 try {
-    db()->exec("ALTER TABLE payouts ADD COLUMN provider VARCHAR(32) DEFAULT 'cashfree'");
-} catch (Throwable $e) { /* column already exists; ignore */ }
+    $pdo = db();
+    $dbName = $pdo->query('SELECT DATABASE()')->fetchColumn();
+    $has = $pdo->prepare(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'payouts' AND COLUMN_NAME = 'provider'"
+    );
+    $has->execute([$dbName]);
+    if ((int)$has->fetchColumn() === 0) {
+        $pdo->exec("ALTER TABLE payouts ADD COLUMN provider VARCHAR(32) DEFAULT 'cashfree'");
+    }
+} catch (Throwable $e) {
+    error_log('[payouts.php] schema migration warning: ' . $e->getMessage());
+}
 
 // === 1) Handle Cashfree payout submission ===
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send') {
@@ -114,7 +135,7 @@ $pending = node_fetch_pending_payouts();
 $pdo     = db();
 $history = $pdo->query('SELECT * FROM payouts ORDER BY created_at DESC LIMIT 100')->fetchAll(PDO::FETCH_ASSOC);
 
-$ebwDashUrl = ebw_dashboard_url($ebw['mode'] ?? 'live');
+$ebwDashUrl = ebw_dashboard_url(is_array($ebw) ? ($ebw['mode'] ?? 'live') : 'live');
 
 require __DIR__ . '/header_admin.php';
 ?>
