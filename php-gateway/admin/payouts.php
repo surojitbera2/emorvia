@@ -8,6 +8,47 @@ if (!empty($_GET['debug'])) {
     error_reporting(E_ALL);
 }
 
+// Inline fallback so this page works even if lib/easebuzz_wire.php
+// wasn't re-uploaded yet (defines the same shape as ebw_payout_notify_node).
+if (!function_exists('_ebw_inline_notify_node')) {
+    function _ebw_inline_notify_node($providerId, $amount, $transferId, $utr, $status, $note = '') {
+        $cfg = node_config();
+        if (empty($cfg['base_url']) || empty($cfg['shared_secret'])) {
+            return ['ok' => false, 'error' => 'Node.js gateway not configured in admin settings', 'response' => ''];
+        }
+        $payload = json_encode([
+            'providerId'   => $providerId,
+            'amount'       => (float)$amount,
+            'transferId'   => $transferId,
+            'cfTransferId' => $utr,
+            'status'       => $status,
+            'note'         => $note ?: ('Easebuzz Wire (manual) · UTR ' . $utr),
+            'ts'           => time(),
+        ]);
+        $sig = hash_hmac('sha256', $payload, $cfg['shared_secret']);
+        $url = rtrim($cfg['base_url'], '/') . '/api/ext-payout/complete';
+        $ch  = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 20,
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/json', 'X-Gateway-Signature: ' . $sig],
+        ]);
+        $body = curl_exec($ch);
+        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err  = curl_error($ch);
+        curl_close($ch);
+        return [
+            'ok'       => $http >= 200 && $http < 300,
+            'http'     => $http,
+            'response' => $body,
+            'error'    => $err ?: ($http >= 400 ? $body : null),
+        ];
+    }
+}
+
+
 admin_require_login();
 $page = 'payouts';
 
@@ -114,9 +155,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'easeb
         $payoutRowId = (int)$pdo->lastInsertId();
 
         if ($statusU === 'SUCCESS') {
-            $n = ebw_payout_notify_node($providerId, $amount, $transferId, $utr, $statusU, $notes ?: ('Easebuzz Wire (manual) · UTR ' . $utr));
+            // Fallback inline notifier so payouts.php works even if lib/easebuzz_wire.php wasn't re-uploaded
+            if (function_exists('ebw_payout_notify_node')) {
+                $n = ebw_payout_notify_node($providerId, $amount, $transferId, $utr, $statusU, $notes ?: ('Easebuzz Wire (manual) · UTR ' . $utr));
+            } else {
+                $n = _ebw_inline_notify_node($providerId, $amount, $transferId, $utr, $statusU, $notes ?: ('Easebuzz Wire (manual) · UTR ' . $utr));
+            }
             $pdo->prepare('UPDATE payouts SET node_notified=?, node_response=? WHERE id=?')
-                ->execute([$n['ok'] ? 1 : 0, mb_substr((string)$n['response'], 0, 2000), $payoutRowId]);
+                ->execute([$n['ok'] ? 1 : 0, mb_substr((string)($n['response'] ?? ''), 0, 2000), $payoutRowId]);
             if ($n['ok']) {
                 $flash_ok = "Easebuzz Wire payout of ₹{$amount} to {$upiId} recorded (UTR {$utr}). Listener earnings updated.";
             } else {
@@ -135,7 +181,10 @@ $pending = node_fetch_pending_payouts();
 $pdo     = db();
 $history = $pdo->query('SELECT * FROM payouts ORDER BY created_at DESC LIMIT 100')->fetchAll(PDO::FETCH_ASSOC);
 
-$ebwDashUrl = ebw_dashboard_url(is_array($ebw) ? ($ebw['mode'] ?? 'live') : 'live');
+$ebwMode    = is_array($ebw) ? ($ebw['mode'] ?? 'live') : 'live';
+$ebwDashUrl = function_exists('ebw_dashboard_url')
+    ? ebw_dashboard_url($ebwMode)
+    : ($ebwMode === 'live' ? 'https://wire.easebuzz.in/' : 'https://testwire.easebuzz.in/');
 
 require __DIR__ . '/header_admin.php';
 ?>
